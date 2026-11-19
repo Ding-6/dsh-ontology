@@ -3,12 +3,15 @@
  *
  *   node tools/sync-live.mjs                       # 同步 + 重指 junction + 改 profile 依赖
  *   node tools/sync-live.mjs --dry-run             # 只打印要做什么
- *   node tools/sync-live.mjs --target <dir>       # 指定活路径（默认 ../dsh-ontology-live）
+ *   node tools/sync-live.mjs --target <dir>       # 指定活路径（默认按时间戳新建一个）
  *   node tools/sync-live.mjs --profiles desktop,web
  *
  * 为什么需要它：DSH 宿主按**真实文件 URL** 缓存 ESM 模块（loadCache 的键不带 query）。
  * 在同一个路径上改文件，宿主不会重新 import —— 表现为「代码改了不生效」。
  * 换成一个新路径，宿主就会重新 import 新代码。
+ *
+ * 所以默认活路径**每次都新建一个带时间戳的目录**：复用旧路径等于复用宿主内存里的旧模块。
+ * （旧目录可以随时删；确认宿主已经加载新路径后再删。）
  *
  * 同步完还不一定立刻生效：bundle 的 include 树会缓存已加载的 entry。
  * 最省事的做法是**重启 DSH**；不想重启就按 AGENTS.md 的说法把 profile 的
@@ -28,7 +31,9 @@ const flag = (name, fallback) => {
   const i = argv.indexOf(name)
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback
 }
-const target = resolve(flag('--target', join(process.env.USERPROFILE || process.env.HOME || '', 'Downloads', 'dsh-ontology-live')))
+const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-')
+const defaultTarget = join(process.env.USERPROFILE || process.env.HOME || '', 'Downloads', `dsh-ontology-live-${stamp}`)
+const target = resolve(flag('--target', defaultTarget))
 const profiles = flag('--profiles', 'desktop,web').split(',').map((s) => s.trim()).filter(Boolean)
 
 /** 要同步的运行时文件（与 package.json 的 files 对齐，但不含文档与图片）。 */

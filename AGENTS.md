@@ -74,10 +74,11 @@ ONTOLOGY_TOKEN=$(sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]
 同一个路径上改文件，宿主**不会**重新 import —— 症状是「代码改了不生效」，清缓存没用。
 
 ```bash
-node tools/sync-live.mjs            # 仓库 → 活路径（默认 ~/Downloads/dsh-ontology-live）+ 重指 profile 依赖与 junction
+node tools/sync-live.mjs            # 仓库 → 活路径（默认新建一个带时间戳的目录）+ 重指 profile 依赖与 junction
 node tools/sync-live.mjs --dry-run  # 只看要做什么
 ```
 
+- 活路径**每次都换一个新的**：宿主按文件 URL 缓存 ESM 模块，同一个路径上的新内容不会被重新 import。
 - 换路径只解决「模块被缓存」这一半；bundle 的 include 树还缓存着已加载的 entry。
   不重启 DSH 的做法：把 profile `package.json` 里 `dsh.profile.bundles` 中那个包名摘掉 → 等 4 秒 → 再加回去 → 等 5 秒。
 - 手工 `ctx.loader.create({name})` 建第二个实例会撞 `prompt section "ontology-protocol" is already registered`；
