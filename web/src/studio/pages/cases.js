@@ -1,0 +1,298 @@
+/* Cross-card case library: one table over every case that lives on a card, so
+   "what cases do we have and what did they do last time" is answerable without
+   opening twenty drawers. Read-only for now; the regression runner is next. */
+
+import { client } from '../context.js'
+import { Table, TableHeader, TableColumn, TableBody, TableRow, TableCell } from '../../components/base/table/table'
+import { CASE_RESULTS, CASE_RESULT_LABEL } from '../labels.js'
+import { Button as BoarduiButton } from '../../boardui/index'
+import { fmtTime } from '../format.js'
+
+export function CasesPage({ state, onOpenTask }) {
+  const { h, React, api, toast, confirmDialog, promptDialog, TextField, SelectField, ChipField, CheckField } = client()
+  const [rows, setRows] = React.useState(null)
+  const [error, setError] = React.useState(null)
+  const [query, setQuery] = React.useState('')
+  const [requirement, setRequirement] = React.useState('__all__')
+  const [result, setResult] = React.useState('__all__')
+  const [selected, setSelected] = React.useState(() => new Set())
+  const [running, setRunning] = React.useState(false)
+  const [suites, setSuites] = React.useState([])
+  const [suiteCounts, setSuiteCounts] = React.useState({})
+  const [suiteKeys, setSuiteKeys] = React.useState({})
+  const [suiteFilter, setSuiteFilter] = React.useState(null)
+  const [note, setNote] = React.useState('')
+  const [regressions, setRegressions] = React.useState([])
+  const [openDetail, setOpenDetail] = React.useState(null)
+
+  const refresh = React.useCallback(async () => {
+    try {
+      const out = await api('/cases', {})
+      setRows(Array.isArray(out.cases) ? out.cases : [])
+      setRegressions(Array.isArray(out.regressions) ? out.regressions : [])
+      setSuites(Array.isArray(out.suites) ? out.suites : [])
+      setSuiteCounts(Object.fromEntries((out.counts ?? []).map(item => [item.id, item.count])))
+      setSuiteKeys(Object.fromEntries((out.counts ?? []).map(item => [item.id, item.keys ?? []])))
+      setError(null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      setRows([])
+    }
+  }, [])
+
+  // 卡片上的用例计数一变（跑了一条、加了一条、生成了一批）就重新拉一次。
+  const fingerprint = (state.tasks ?? []).reduce((sum, task) => {
+    const one = task.caseSummary ?? { total: 0, pass: 0, fail: 0 }
+    return sum + one.total * 7 + one.pass * 13 + one.fail * 17
+  }, 0)
+  React.useEffect(() => { void refresh() }, [refresh, fingerprint])
+
+  const list = React.useMemo(() => {
+    const text = query.trim().toLowerCase()
+    const only = suiteFilter === null ? null : new Set(suiteKeys[suiteFilter] ?? [])
+    return (rows ?? []).filter(row => {
+      if (only !== null && !only.has(row.key)) return false
+      if (requirement !== '__all__' && row.requirementId !== requirement) return false
+      if (result !== '__all__' && row.result !== result) return false
+      if (text === '') return true
+      return `${row.id} ${row.title} ${row.taskTitle} ${row.requirementTitle} ${row.pointId}`.toLowerCase().includes(text)
+    })
+  }, [rows, query, requirement, result, suiteFilter, suiteKeys])
+
+  const counts = React.useMemo(() => {
+    const pass = list.filter(row => row.result === 'pass').length
+    const fail = list.filter(row => row.result === 'fail').length
+    const skip = list.filter(row => row.result === 'skip').length
+    return { pass, fail, skip, rest: list.length - pass - fail - skip }
+  }, [list])
+
+  const requirements = state.requirements ?? []
+  const runnable = list.filter(row => row.runnable === true)
+  const picked = runnable.filter(row => selected.has(row.key))
+
+  const toggle = key => setSelected(previous => {
+    const next = new Set(previous)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  })
+  const selectAllRunnable = () => setSelected(new Set(runnable.map(row => row.key)))
+  const clearSelection = () => setSelected(new Set())
+  const runRows = async (rowsToRun) => {
+    if (rowsToRun.length === 0) { setNote('先勾几条带接口定义的用例再跑（手工用例没有 http，跑不了）'); return }
+    setRunning(true)
+    setNote('')
+    try {
+      const out = await api('/cases/run', { keys: rowsToRun.map(row => row.key), by: '回归' })
+      const results = out?.results ?? []
+      const sum = key => results.reduce((n, item) => n + (Number(item[key]) || 0), 0)
+      const broke = results.filter(item => item.ok === false)
+      const parts = [`跑了 ${results.length} 张卡 / ${sum('total')} 条：通过 ${sum('passed')}，不通过 ${sum('failed')}`]
+      if (sum('bugs') > 0) parts.push(`自动开缺陷 ${sum('bugs')} 张`)
+      if (broke.length > 0) parts.push(`${broke.length} 张卡报错：${broke[0].error ?? ''}`)
+      setNote(parts.join('，'))
+      setSelected(new Set())
+      await refresh()
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setRunning(false)
+    }
+  }
+  const noteFor = out => {
+    const results = out?.results ?? []
+    const sum = key => results.reduce((n, item) => n + (Number(item[key]) || 0), 0)
+    const broke = results.filter(item => item.ok === false)
+    const parts = [`跑了 ${results.length} 张卡 / ${sum('total')} 条：通过 ${sum('passed')}，不通过 ${sum('failed')}`]
+    if (sum('bugs') > 0) parts.push(`自动开缺陷 ${sum('bugs')} 张`)
+    if (broke.length > 0) parts.push(`${broke.length} 张卡报错：${broke[0].error ?? ''}`)
+    if (out?.truncated !== undefined) parts.push(`套件共 ${out.truncated.total} 条，本次只跑了前 ${out.truncated.ran} 条`)
+    return parts.join('，')
+  }
+  const runSuite = async suite => {
+    setRunning(true)
+    setNote('')
+    try {
+      const out = await api('/suite/run', { id: suite.id })
+      setNote(noteFor(out))
+      await refresh()
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setRunning(false)
+    }
+  }
+  const saveSuite = async () => {
+    const name = await promptDialog('套件名字（跑的就是当前筛选里的用例）', { title: '新建回归套件', defaultValue: '默认回归' })
+    if (name === null || String(name).trim() === '') return
+    try {
+      await api('/suite/save', {
+        suite: {
+          name: String(name).trim().slice(0, 40),
+          rules: { requirementIds: requirement === '__all__' ? [] : [requirement], httpOnly: true },
+          keys: [],
+          isDefault: suites.length === 0,
+        },
+        by: '人',
+      })
+      toast('已保存套件')
+      await refresh()
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error')
+    }
+  }
+  const makeDefault = async suite => {
+    try {
+      await api('/suite/save', { suite: { ...suite, isDefault: true }, by: '人' })
+      toast(`夜间回归改跑「${suite.name}」`)
+      await refresh()
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error')
+    }
+  }
+  const removeSuite = async suite => {
+    if (!(await confirmDialog(`删除套件「${suite.name}」？用例本身不受影响。`, { title: '删除套件', danger: true, okText: '删除' }))) return
+    try {
+      await api('/suite/delete', { id: suite.id })
+      await refresh()
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : String(cause), 'error')
+    }
+  }
+  const failedRunnable = list.filter(row => row.runnable === true && row.result === 'fail')
+  const runSelected = () => runRows(picked)
+  // 回归最常用的动作：只补跑上次失败的那几条。
+  const runFailed = () => runRows(failedRunnable)
+
+  return h('div', { className: 'ds-body' },
+    h('div', { className: 'ds-panel' },
+      h('div', { className: 'ds-panel-head' },
+        h('span', null, '用例总览'),
+        h('span', { className: 'ds-hint' }, '全公司的用例按卡片汇总：点一行跳回那张卡；用例本身仍在卡片的「测试」里维护'),
+        h(ChipField, { className: 'ds-chip', style: { marginLeft: 'auto' } }, `${list.length} 条 · ✅ ${counts.pass} · ❌ ${counts.fail}${counts.skip > 0 ? ` · ⏭️ ${counts.skip}` : ''}${counts.rest > 0 ? ` · ⬜ ${counts.rest}` : ''}`),
+        h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void refresh() }, '刷新'),
+      ),
+      h('div', { className: 'ds-panel-body' },
+        h('div', { className: 'ds-row' },
+          h(TextField, {
+            className: 'ds-input', style: { width: 240 }, value: query,
+            placeholder: '搜用例 / 卡片 / 需求 / 功能点',
+            onChange: event => setQuery(event.target.value),
+          }),
+          h(SelectField, {
+            className: 'ds-select', style: { width: 220 }, value: requirement,
+            onChange: event => setRequirement(event.target.value),
+          },
+            h('option', { value: '__all__' }, '全部需求'),
+            requirements.map(item => h('option', { key: item.id, value: item.id }, `${item.code || item.id} ${item.title}`)),
+          ),
+          h(SelectField, {
+            className: 'ds-select', style: { width: 140 }, value: result,
+            onChange: event => setResult(event.target.value),
+          },
+            h('option', { value: '__all__' }, '全部结果'),
+            CASE_RESULTS.map(value => h('option', { key: value, value }, CASE_RESULT_LABEL[value])),
+          ),
+        ),
+        h('div', { className: 'ds-row', style: { marginTop: 8 } },
+          h(BoarduiButton, { variant: 'secondary', size: 'small', disabled: running || runnable.length === 0, onClick: selectAllRunnable }, `全选可跑的 ${runnable.length} 条`),
+          h(BoarduiButton, { variant: 'secondary', size: 'small', disabled: running || selected.size === 0, onClick: clearSelection }, '清空选择'),
+          h(BoarduiButton, { variant: 'primary', size: 'small', disabled: running || picked.length === 0, onClick: () => void runSelected() }, running ? '跑着…' : `▶ 跑选中的 ${picked.length} 条`),
+          h(BoarduiButton, { variant: 'secondary', size: 'small', disabled: running || failedRunnable.length === 0, title: '只补跑上次不通过、且有接口定义的用例', onClick: () => void runFailed() }, `↻ 只跑上次失败的 ${failedRunnable.length} 条`),
+          h('span', { className: 'ds-hint' }, '按卡串行跑，每张卡一轮；失败的照旧自动开缺陷（最多一次 60 条）'),
+        ),
+        h('div', { className: 'ds-row', style: { marginTop: 8, flexWrap: 'wrap', gap: 8 } },
+          h('span', { className: 'ds-hint' }, '回归套件：'),
+          suites.length === 0
+            ? h('span', { className: 'ds-hint' }, '还没有套件。把当前筛选存成套件，夜间就自动跑它。')
+            : suites.map(suite => h('span', { key: suite.id, className: 'ds-suite', 'data-default': suite.isDefault ? '1' : '0' },
+              h('span', {
+                style: { cursor: 'pointer' },
+                title: '点一下只看这个套件里的用例，再点一次取消',
+                onClick: () => setSuiteFilter(current => (current === suite.id ? null : suite.id)),
+              }, `📦 ${suite.name}${suite.isDefault ? ' · 默认' : ''} · ${suiteCounts[suite.id] ?? 0} 条${suiteFilter === suite.id ? '（只看中）' : ''}`),
+              h('button', { className: 'ds-btn ds-btn-ghost', disabled: running || (suiteCounts[suite.id] ?? 0) === 0, onClick: () => void runSuite(suite) }, '▶ 跑'),
+              suite.isDefault ? null : h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void makeDefault(suite) }, '设为默认'),
+              h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void removeSuite(suite), 'data-danger': '1' }, '删除'),
+            )),
+          h('button', { className: 'ds-btn ds-btn-ghost', onClick: () => void saveSuite() }, '＋ 存为套件'),
+        ),
+        note === '' ? null : h('div', { className: 'ds-hint', style: { marginTop: 6 } }, note),
+        regressions.length === 0 ? null : h('div', { className: 'ds-reg-list' },
+          h('span', { className: 'ds-hint' }, '最近回归：'),
+          regressions.slice(0, 4).map(item => h('span', {
+            key: String(item.at),
+            className: 'ds-reg-item',
+            'data-bad': (Number(item.failed) || 0) + (Number(item.failedCards) || 0) > 0 ? '1' : '0',
+            title: `${new Date(item.at).toLocaleString('zh-CN')} · ${item.by || '人'}`,
+          }, `${fmtTime(item.at)} ${item.by || ''} · ${item.cards} 卡 / ${item.total} 条 · ✅${item.passed} ❌${item.failed}${item.bugs > 0 ? ` 🐞${item.bugs}` : ''}`)),
+        ),
+        error !== null ? h('div', { className: 'ds-err' }, error) : null,
+        rows === null
+          ? h('div', { className: 'ds-hint', style: { padding: '10px 2px' } }, '载入用例…')
+          : list.length === 0
+            ? h('div', { className: 'ds-empty' }, '没有符合条件的用例。用例登记在卡片详情的「测试」里。')
+            : h('div', { className: 'ds-case-lib' },
+              /* 官方 Table：react-aria 的 Table + Column/Row/Cell，产出真 <table>/<th>/<td>，
+                 行选择与键盘导航由组件负责。原来是一串 div 拼的 8 列网格。
+                 RAC 的 collection 组件不能被自定义组件包住（官方 table.tsx 注释也写了），
+                 所以这里直接用它的再导出。 */
+              h(Table, {
+                size: 'sm',
+                'aria-label': '用例库',
+                selectionMode: 'multiple',
+                selectedKeys: selected,
+                onSelectionChange: keys => setSelected(new Set(keys)),
+                onRowAction: key => {
+                  const target = list.find(item => item.key === key)
+                  if (target !== undefined) onOpenTask(target.taskId)
+                },
+              },
+                h(TableHeader, null,
+                  h(TableColumn, { id: 'result', isRowHeader: true }, '结果'),
+                  h(TableColumn, { id: 'title' }, '用例'),
+                  h(TableColumn, { id: 'meta' }, '所属卡片 / 需求'),
+                  h(TableColumn, { id: 'kind' }, '类型'),
+                  h(TableColumn, { id: 'priority' }, '优先级'),
+                  h(TableColumn, { id: 'at' }, '最近执行'),
+                  h(TableColumn, { id: 'more' }, '明细'),
+                ),
+                h(TableBody, null,
+                  /* 不能用 isDisabled 表达"不可跑"：它同时禁掉行激活，手工用例就点不开所属卡片了。
+               选择按 row.runnable 在 selection 层控制（见 selectedKeys 的计算）。 */
+              list.map(row => h(TableRow, { key: row.key, id: row.key, isDisabled: running === true },
+                    h(TableCell, null, CASE_RESULT_LABEL[row.result] ?? row.result),
+                    h(TableCell, null, row.title),
+                    h(TableCell, null, `${row.taskCode || row.taskId} · ${row.requirementTitle || '未挂需求'}${row.pointId ? ' · ' + row.pointId : ''}`),
+                    h(TableCell, null, row.http ? '接口' : row.shell ? 'shell' : row.db ? '数据库' : '手工'),
+                    h(TableCell, null, row.priority),
+                    h(TableCell, null, row.lastRunAt > 0 ? fmtTime(row.lastRunAt) : '没跑过'),
+                    h(TableCell, null,
+                      h(BoarduiButton, {
+                        variant: 'ghost',
+                        size: 'small',
+                        onPress: () => setOpenDetail(openDetail === row.key ? null : row.key),
+                      }, openDetail === row.key ? '收起' : '明细'),
+                    ),
+                  )),
+                ),
+              ),
+              // 明细面板放在表格下面：RAC 的行不支持内联展开，展开内容挪到表外，行为与原来一致。
+              openDetail === null
+                ? null
+                : (() => {
+                  const row = list.find(item => item.key === openDetail)
+                  if (row === undefined) return null
+                  return h('div', { className: 'ds-case-lib-detail' },
+                    h('div', null, `期望：${row.expected || '—'}`),
+                    h('div', null, `最近一次：${row.note || (row.lastRunAt > 0 ? '只有结果，没有记录' : '还没跑过')}`),
+                    row.lastError === '' ? null : h('div', { className: 'ds-err' }, `错误：${row.lastError}`),
+                    row.lastPreview === '' ? null : h('pre', { className: 'ds-case-lib-preview' }, row.lastPreview),
+                    h('div', { className: 'ds-hint' }, `用例编号 ${row.id} · 所属卡片 ${row.taskCode || row.taskId}`),
+                  )
+                })(),
+            ),
+      ),
+    ),
+  )
+}

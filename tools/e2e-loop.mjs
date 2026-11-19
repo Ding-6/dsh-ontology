@@ -1,0 +1,126 @@
+// 全闭环验收：澄清门禁 → 评审 → 拆卡 → 各列 → 代码事实 → 用例真跑 → 验收 → 版本发布。
+//
+//   ONTOLOGY_BASE=http://<host>:18080 node tools/e2e-loop.mjs             # 跑 1 次
+//   ONTOLOGY_BASE=http://<host>:18080 node tools/e2e-loop.mjs --k 3       # 跑 3 次，看成功率
+//   ... --keep                                                         # 保留数据看结果
+//
+// 每轮都真建一条需求和若干张卡，默认跑完自动删除。
+// 需要：目标项目在主机上有 git 仓库、config.testing.allowShell 打开、shellCwd 指向仓库。
+const BASE = process.env.ONTOLOGY_BASE ?? 'http://192.168.120.218:18080'
+const PROJECT = process.env.E2E_PROJECT ?? 'admin-portal'
+const SHELL_CWD = process.env.E2E_SHELL_CWD ?? '/home/lyf/repos/admin-portal'
+const argv = process.argv.slice(2)
+const kIndex = argv.indexOf('--k')
+const ROUNDS = Math.max(1, Math.min(10, Number(kIndex >= 0 ? argv[kIndex + 1] : 1) || 1))
+const keep = argv.includes('--keep')
+
+const post = async (path, body) => {
+  const res = await fetch(BASE + '/ontology-api' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) })
+  return { status: res.status, body: await res.json().catch(() => ({})) }
+}
+const state = async () => (await (await fetch(BASE + '/ontology-api/state')).json()).state
+
+async function runOnce(round) {
+  const failures = []
+  const step = (label, ok, detail) => {
+    console.log('  ' + (ok ? 'ok   ' : 'FAIL ') + label + (detail === undefined ? '' : ' — ' + detail))
+    if (!ok) failures.push(label)
+  }
+  const stamp = new Date().toISOString().slice(5, 16).replace('T', ' ') + ' #' + round
+  const cfg = (await state()).config
+  await post('/config', { testing: { ...cfg.testing, allowShell: true, shellCwd: SHELL_CWD } })
+
+  const points = [
+    { id: 'p1', title: '订单接口与建表', description: 'API + SQLite', priority: 'normal', status: 'draft', acceptance: [{ text: 'GET /api/orders 返回 200 且含 note 字段' }] },
+    { id: 'p2', title: '可拆卡并建 worktree', description: '拆卡 + 分支', priority: 'normal', status: 'draft', acceptance: [{ text: '拆完卡能在 /tmp/studio-wt-test 下看到 worktree' }] },
+  ]
+  const saved = await post('/requirement/save', { requirement: { title: '全闭环自检 ' + stamp, description: 'tools/e2e-loop.mjs 生成', project: PROJECT, points } })
+  const req = saved.body.requirement
+  await post('/requirement/review', { id: req.id, decision: 'submit', by: '产品' })
+  const approved = await post('/requirement/review', { id: req.id, decision: 'approve', by: '架构师', note: '范围清楚' })
+  step('评审通过', approved.body.review?.status === 'approved', String(approved.body.review?.status))
+
+  const blocked = await post('/requirement/split', { id: req.id })
+  step('未答三问被拦', blocked.status === 400 && String(blocked.body.error ?? '').includes('澄清'), String(blocked.status))
+
+  await post('/requirement/save', { requirement: { id: req.id, title: req.title, description: req.description, project: PROJECT, discovery: { server: '有，node:sqlite 持久化', auth: '服务端校验，viewer 写接口 403', boundary: '前后端都交付，含测试' }, points } })
+  // 需求准出门禁要求有产品输出：先补一份 PRD 正文（真实流程也是这么走的）
+  await post('/requirement/doc', { id: req.id, action: 'add', by: '产品', doc: { id: 'prd', kind: 'prd', title: 'PRD', version: 'v1.0', content: '自检用 PRD：范围与验收标准各一句。' } })
+  await post('/requirement/pool', { id: req.id, pool: { reach: 100, impact: 1, confidence: 80, effort: 2 } })
+
+  const split = await post('/requirement/split', { id: req.id })
+  const created = split.body.created ?? []
+  step('答完三问可拆卡', split.status === 200 && created.length > 0, created.length + ' 张')
+  step('没有后端覆盖提示', (split.body.warnings ?? []).length === 0, JSON.stringify(split.body.warnings ?? []))
+
+  const cards = (await state()).tasks.filter(t => t.requirementId === req.id)
+  for (const card of cards) {
+    const wt = await post('/task/worktree', { id: card.id, action: 'create' })
+    const info = wt.body.worktree ?? {}
+    await post('/task/coding', { id: card.id, action: 'update', coding: { agent: 'dev', branch: info.branch ?? '', files: [], commits: [], tests: { total: 16, passed: 16 } } })
+    await post('/task/case', { id: card.id, action: 'add', cases: [
+      { title: 'pnpm test', expected: '没有失败', shell: { command: 'pnpm test', expectExit: 0, expectContains: 'fail 0', timeoutMs: 180000 } },
+      { title: 'pnpm build', expected: 'built in', shell: { command: 'pnpm build', expectExit: 0, expectContains: 'built in', timeoutMs: 180000 } },
+    ] })
+    for (const status of ['design', 'dev_ready', 'dev', 'review']) await post('/task/update', { id: card.id, status })
+    await new Promise(r => setTimeout(r, 2500))
+    const reviewed = (await state()).tasks.find(t => t.id === card.id)
+    await post('/task/update', { id: card.id, status: 'test' })
+    const run = await post('/task/case/run', { id: card.id })
+    const parts = (await post('/task/parts', { id: card.id })).body
+    for (const item of (parts.checklist ?? [])) await post('/task/checklist', { id: card.id, action: 'check', itemId: item.id, by: '产品' })
+    await post('/task/update', { id: card.id, status: 'accept' })
+    await post('/task/signoff', { id: card.id, by: '产品', note: '用例通过' })
+    const done = await post('/task/update', { id: card.id, status: 'done' })
+    step('卡 ' + card.code, reviewed?.coding?.verified?.ok === true && run.body.run?.failed === 0 && done.body.task?.status === 'done',
+      'worktree=' + (info.base ?? '?') + ' 核对=' + String(reviewed?.coding?.verified?.ok) + ' 用例=' + String(run.body.run?.passed) + '/' + String(run.body.run?.total))
+  }
+
+  // 上下文洞察：占用率必须是引擎窗口算出来的，构成占比加起来要是 100
+  const contexts = await post('/contexts', {})
+  const rows = contexts.body?.rows ?? []
+  const totals = contexts.body?.totals ?? {}
+  step('上下文洞察', rows.length > 0 && Number(totals.window) > 0, rows.length + ' 位专家 · 窗口 ' + Math.round((Number(totals.window) || 0) / 1000) + 'k · 最高占用 ' + (totals.percent ?? 0) + '%')
+  const worstPercent = rows.reduce((max, row) => Math.max(max, Number(row.percent ?? 0)), 0)
+  step('占用率可信', worstPercent >= 0 && worstPercent <= 100, '最高 ' + worstPercent + '%')
+  const firstExpert = String(rows[0]?.expert ?? '')
+  if (firstExpert !== '') {
+    const detail = await post('/contexts/session', { expert: firstExpert })
+    const parts = detail.body?.breakdown?.parts ?? []
+    const sum = parts.reduce((total, part) => total + Number(part.percent ?? 0), 0)
+    step('构成占比自洽', parts.length >= 4 && sum >= 99 && sum <= 101, firstExpert + ' 五项合计 ' + sum + '%')
+  }
+
+  const fin = await post('/requirement/signoff', { id: req.id, by: '产品', note: '全闭环自检通过' })
+  const after = (await state()).requirements.find(r => r.id === req.id)
+  step('需求交付', (fin.body.requirement?.status ?? after?.status) === 'delivered', String(fin.body.requirement?.status ?? after?.status))
+
+  const cardsNow = (await state()).tasks.filter(t => t.requirementId === req.id)
+  const rel = await post('/release/save', { release: { name: '全闭环自检版本 ' + stamp, version: '0.0.0-' + stamp.replace(/[^0-9]/g, ''), project: PROJECT, tagName: 'e2e-' + stamp.replace(/[^0-9]/g, ''), smoke: [{ text: '自检脚本跑通', done: true }] } })
+  const release = rel.body.release ?? {}
+  await post('/release/link', { id: release.id, taskIds: cardsNow.map(c => c.id) })
+  const published = await post('/release/publish', { id: release.id, by: '产品' })
+  step('版本发布', published.body.release?.status === 'released', String(published.body.release?.status ?? published.body.error).slice(0, 50))
+
+  if (!keep) {
+    // 卡删掉但 worktree/分支留着的话会越积越多（实测积了 27 个）
+    for (const card of cardsNow) await post('/task/worktree', { id: card.id, action: 'remove' })
+    for (const card of cardsNow) await post('/task/delete', { id: card.id })
+    await post('/requirement/delete', { id: req.id })
+    if (release.id !== undefined) await post('/release/delete', { id: release.id })
+    const left = await state()
+    step('清理', left.tasks.filter(t => t.requirementId === req.id).length === 0, '已删除自检数据')
+  }
+  return failures
+}
+
+const started = Date.now()
+const results = []
+for (let round = 1; round <= ROUNDS; round += 1) {
+  console.log('\n第 ' + round + '/' + ROUNDS + ' 轮')
+  results.push(await runOnce(round))
+}
+const passed = results.filter(f => f.length === 0).length
+console.log('\n' + (ROUNDS > 1 ? 'k=' + ROUNDS + '：' : '') + passed + '/' + results.length + ' 轮全绿（' + Math.round((Date.now() - started) / 1000) + ' 秒）')
+if (passed !== results.length) console.log('失败明细：' + results.map((f, i) => (f.length === 0 ? '' : '第' + (i + 1) + '轮 ' + f.join('/'))).filter(Boolean).join('；'))
+process.exit(passed === results.length ? 0 : 1)

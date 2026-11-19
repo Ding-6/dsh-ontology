@@ -1,0 +1,105 @@
+{
+  "name": "@ding-6/dsh-ontology",
+  "version": "0.5.0",
+  "type": "module",
+  "description": "DSH Ontology: a general-purpose ontology application development copilot in DSH — model objects / relations / rules / actions (AI drafts, experts calibrate), turn them into data models, rules engines, APIs, frontends and test plans, and teach the platform manual by searching the built-in handbook.",
+  "main": "index.js",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "ai-agents",
+    "ontology",
+    "semantic-layer",
+    "mcp",
+    "multi-agent"
+  ],
+  "icon": "./icon.svg",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ding-6/dsh-ontology.git"
+  },
+  "homepage": "https://github.com/Ding-6/dsh-ontology#readme",
+  "author": "布丁 <1103250270@qq.com>",
+  "bugs": {
+    "url": "https://github.com/Ding-6/dsh-ontology/issues"
+  },
+  "scripts": {
+    "test": "node --test tests/repo.test.mjs tests/store-boot.test.mjs tests/client-units.test.mjs tests/notify.test.mjs",
+    "check": "node --check index.js && node --check client.src.js && node --test tests/repo.test.mjs tests/store-boot.test.mjs tests/client-units.test.mjs tests/notify.test.mjs",
+    "smoke:store": "node scripts/smoke-store.mjs",
+    "mock:gitlab": "node tools/mock-gitlab.mjs",
+    "verify:gitlab": "node tools/verify-gitlab-facts.mjs",
+    "selfcheck": "node tools/e2e-loop.mjs --k 3",
+    "verify:release": "node tools/verify-release.mjs",
+    "verify:usage": "node tools/verify-usage.mjs",
+    "shots": "node tools/visual/capture.mjs",
+    "verify:scale": "node tools/visual/board-scale.mjs",
+    "verify:costs": "node tools/visual/cost-price-probe.mjs",
+    "verify:fields": "node tools/visual/fields-probe.mjs",
+    "verify:pages": "node tools/visual/pages-probe.mjs",
+    "verify:drawer": "node tools/visual/drawer-probe.mjs",
+    "verify:sweep": "node tools/visual/sweep.mjs",
+    "verify:audit": "node tools/visual/audit.mjs",
+    "verify:selects": "node tools/visual/select-audit.mjs",
+    "verify:drawertabs": "node tools/visual/drawer-tabs.mjs",
+    "review:layout": "node tools/visual/layout-audit.mjs",
+    "diag:toast": "node tools/visual/toast-diag.mjs",
+    "verify:toast": "node tools/visual/toast-probe.mjs",
+    "verify:auditlog": "node tools/visual/audit-log-probe.mjs",
+    "review:components": "node tools/visual/component-audit.mjs",
+    "verify:login": "node tools/visual/login-probe.mjs",
+    "verify:facts": "node tools/visual/facts-probe.mjs",
+    "verify:ontology": "node tools/visual/ontology.mjs",
+    "release:check": "node tools/release-check.mjs"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "src",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "dist/client.js",
+    "client.src.js",
+    "AGENTS.md",
+    "docs/*.md",
+    "docs/images/*.png",
+    "scripts/*.mjs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.1-rc.5+": "compatible"
+      }
+    }
+  },
+  "engines": {
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.5"
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "pixelmatch": "^8.0.0",
+    "pngjs": "^7.0.0",
+    "puppeteer-core": "^25.17.0",
+    "ssh2": "^1.17.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "title": "Ontology Modeling Workspace",
+    "description": "Ontology development workspace: AI drafts objects / attributes / relations / rules / actions, experts calibrate them, and the semantic layer is shared over MCP or an ontology SDK."
+  },
+  "shared": {
+    "entry": {
+      "label": "Ontology Modeling Workspace"
+    }
+  }
+}

@@ -1,0 +1,139 @@
+name: release
+
+# 打 tag（v0.2.2 这种）自动发版到 npm。凭证走 **Trusted Publishing（OIDC）**，仓库里不放令牌。
+#
+# 一次性配置（npmjs.com，只做一次）：
+#   包页面 → Settings → Trusted Publisher → GitHub Actions
+#     Organization or user:  Ding-6
+#     Repository:             dsh-ontology
+#     Workflow filename:      release.yml      ← 必须正好是这个名字
+#     Environment name:       （留空）
+#
+# 注意：Trusted Publishing 要求 **npm CLI ≥ 11.5.1**，GitHub 的 Node 22 自带 10.x，
+# 所以下面显式升级 npm。漏了会得到 ENEEDAUTH，看着像 OIDC 没生效。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # 手动触发：只跑校验链、不发布（调试 workflow 用，不用造新版本号）
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # OIDC 必需
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: 升级 npm（Trusted Publishing 需要 >= 11.5.1）
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: 校验 tag 与 package.json 版本一致
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME 与 package.json 的 $PKG 不一致"
+            exit 1
+          fi
+
+      - name: 语法
+        run: node --check index.js && node --check client.src.js
+
+      - name: 契约测试
+        run: npm test
+
+      - name: 构建
+        working-directory: web
+        run: pnpm install --frozen-lockfile && pnpm build
+
+      - name: 产物一致性
+        run: |
+          cmp dist/client.js client.js
+          git diff --exit-code -- dist/client.js client.js
+
+      - name: 发版前自检（文档是否跟上）
+        run: npm run release:check
+
+      # 失败原因写成 GitHub annotation：Actions 日志接口对未认证请求是 403，
+      # 而 annotations 是公开可读的，这样不用登录也能看到 npm 的真实报错。
+      - name: 诊断环境
+        run: |
+          echo "npm: $(npm --version)"
+          echo "registry: $(npm config get registry)"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "OIDC token endpoint: 可用"
+          else
+            echo "OIDC token endpoint: 不可用（检查 permissions: id-token: write）"
+          fi
+
+      - name: 发布到 npm（OIDC，无需令牌）
+        if: github.event_name == 'push'
+        run: |
+          # 预发布版本（0.2.2-rc.1 这类）必须显式给 --tag，否则 npm 直接报
+          # "You must specify a tag using --tag when publishing a prerelease version"。
+          # 正式版不传，交给 npm 默认的 latest。
+          VER="$(node -p "require('./package.json').version")"
+          case "$VER" in
+            *-*) TAG_ARG="--tag next" ;;
+            *)   TAG_ARG="" ;;
+          esac
+          echo "publishing $VER ${TAG_ARG:-(default tag latest)}"
+          set +e
+          out=$(npm publish --access public --provenance $TAG_ARG 2>&1)
+          code=$?
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            msg=$(echo "$out" | grep -iE "npm error|ENEEDAUTH|E[0-9]{3}|403|401|trusted|provenance" | head -4 | tr '\n' ' ')
+            echo "::error::npm publish 失败：$msg"
+          fi
+          exit $code
+
+      # npm publish 返回 0 不等于真的发上去了（staged / 竞争 / 中断都可能让它变成空操作）。
+      # 这里直接问 registry：最多等 5 分钟（npm 的读缓存有传播延迟，2 分钟不够 —— rc.3 就是因此误判）。
+      - name: 确认版本真的进了 registry
+        if: github.event_name == 'push'
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          for i in $(seq 1 30); do
+            got="$(npm view "@ding-6/dsh-ontology@$VER" version 2>/dev/null | tail -1)"
+            echo "第 $i 次查询: ${got:-未出现}"
+            if [ "$got" = "$VER" ]; then
+              echo "已发布 $VER"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::npm publish 返回成功，但 registry 上查不到 $VER"
+          exit 1
+
+      # CI 里是 detached HEAD，仓库里没有本地 main 分支，跑 verify:release 的
+      # “没有未推送的提交 / origin/main 与 HEAD 一致” 必然误导。这里只核对 registry。
+      # 完整的一致性检查（本地 tag / origin / registry 四处）留在本地发版前跑。
+      - name: 发布后核对（仅正式版）
+        if: success() && !contains(github.ref_name, '-')
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          LATEST="$(npm view @ding-6/dsh-ontology version)"
+          echo "package.json=$VER registry latest=$LATEST"
+          if [ "$LATEST" != "$VER" ]; then
+            echo "::error::registry latest=$LATEST 与 package.json=$VER 不一致"
+            exit 1
+          fi
+          echo "registry 已指向 $VER"

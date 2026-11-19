@@ -1,0 +1,206 @@
+# dsh-ontology · 开发指南
+
+给接手这个仓库的人（和 AI）看的操作手册。原则只有一条：**改动必须能在真实浏览器与真实 dsh 上验证，验证不出来的改动不算完成。**
+
+## 1. 仓库结构
+
+| 路径 | 是什么 | 谁能改 |
+| --- | --- | --- |
+| `index.js` | 宿主半边：`apply(ctx)`、50 个 `ontology_*` 工具、`/ontology-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
+| `src/host/*.js` | 宿主层模块：`cases.js`（跨卡用例聚合与回归汇总：`collectCases` / `groupCaseKeys` / `summarizeRun`，纯函数）、`team-memory.js`（专家团的团级记忆，存 side 键）、`quality.js`（AI 质量：返工识别与按专家汇总，纯函数）、`gitlab-facts.js`（执行记录 vs MR 事实的对账，纯函数）、`impact.js`（需求改版的影响面：受影响的卡与要重跑的用例，纯函数）、`design.js`（设计评审记录与进开发前的闸门，纯函数）、`shell-runner.js`（shell 用例执行器，默认关闭）、`shell-case.js`（shell 用例的数据形状，纯函数）、`runners.js`（用例执行器注册表：match + run，加新执行方式不用动 runOneCase）、`limits.js`（数量上限的默认值与清洗，可配置）、`db-runner.js`（SQLite 用例执行器与数据形状，默认关闭）、`discovery.js`（需求澄清必答项与拆卡门禁，纯函数）、`override.js`（绕过准出的结构化记录，纯函数）、`bugs.js`（失败用例 → 缺陷卡严重级别，纯函数）、`bitable.js`（卡片 → 飞书多维表格记录，分批 200，纯函数）、`context-insight.js`（上下文洞察：窗口峰值 / 回合 / 工具 / 重试 / 压缩点，纯函数）、`artifact-image.js`（交付物截图读取：只认白名单目录与图片扩展名）、`lark-doc.js`（飞书文档正文解析：把 lark-cli 的 fetch 输出变成 {ok,title,text,error}，纯函数）、`usage.js`（会话用量解析与计价，纯函数）、`session-usage.js`（读 session.v4 日志并按卡/专家汇总）、`events.js`（进程内事件总线，同步扇出）、`webhooks.js`（事件 → 出站 webhook，失败不重试）、`access.js`（权限判定：`checkAccess` / `accessLevelFor` / `READ_ONLY_POST_ROUTES`，纯函数；超管豁免只认服务端认定的身份、名字精确匹配）、`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`roles.js`（四位本体角色的出厂设定：业务/架构/建模/校验 + 各自提示词，纯函数）、`paths.js`（`dshHomePath` / `dataPath` 改名兼容 / `skillsRoot` / `isSkillName`，纯函数）、`ontology.js`（统一语义层台账：8 类资产（对象/关系/规则/行动/术语/实例/形状/应用）+ 多本体容器 + 建模建议器 + MCP/SDK 生成，纯函数）、`ontology-seed.js`（可选示例本体（商企市场 46 对象/65 属性/54 关系/29 规则/10 行动），默认不导入，纯数据）、`ontology-templates.js`（8 套领域骨架模板 general/industrial/safety/health/defense/geo/finance/knowledge，只给结构不给行业数据 + `applyOntologyTemplate`，纯数据）、`ontology-blueprint.js`（应用蓝图：数据模型/规则引擎/API 契约/前端设计/本体驱动/测试方案六章，纯函数）、`ontology-guide-book.js`（内置平台操作手册书：86 个章节，随插件分发，可一键载入手册库并按关键词检索，纯数据）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`store.js`（`StudioStore`/`SecretStore`：SQLite 台账 + 快照 + 登录会话）、`integrations.js`（GitLab / 飞书 / 平台健康）、`routes/*.js`（按前缀拆出的 HTTP 处理：`exports.js` 导出 CSV、`auth.js` 统一登录、`tasks.js` 卡片/专家/列、`requirements.js` 需求/文档/公开提单、`releases.js` 版本/灰度/部署、`insights.js` 指标与工作台、`state.js` `/state` 的 ETag 与 304、`skills.js` 技能库读写上传、`admin.js` 配置/权限成员/审计/快照、`connect.js` 市场/集成健康/GitLab/仓库/飞书、`agents.js` 派单运行态与起停、`coding.js` 执行记录/失败重试/worktree/项目配置、`ontology.js` 语义层读写（台账/校准/导入/服务封装/建模建议/应用蓝图/模板/手册/多本体）、`tools.js` 50 个 `ontology_*` 工具） | ✅ 直接改，新逻辑优先放这里 |
+| `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
+| `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥；`web/src/studio/*.js` 是从 `client.src.js` 抬出来的纯模块（`markdown.js` 渲染器、`format.js` 日期格式、`labels.js` 标签表、`roster.js` 负责人与候选人、`fields.js` 表单适配层、`shell.js` 共享抽屉、`card.js` 看板卡片、`board.js` 看板本体、`mentions.js` @ 选择器、`cases.js` 多步用例解析、`drawer.js` 卡片详情抽屉、`editor.js` 通用编辑器、`palette.js` 命令面板（⌘K 全局搜索卡片/需求/版本/专家/专家团/项目/技能 + 动作项 + Ctrl/⌘+Alt+Shift+N/T/D 全局快捷键；带 Shift 是为了避开宿主的 Ctrl+Alt+N 新会话）、`charts.js` 进度条与燃尽图、`context.js` 共享上下文（`provideClient`/`client`）、`panels/*.js` 设置页 17 个面板、`pages/*.js` 六个页面组件（看板之外的工作台/需求/用例/版本/效能/自助提单）；**`StudioPage` 是组合根，故意留在 `client.src.js`**，它负责顶栏、页签与「＋ 新建」菜单并调用 `provideClient()`，别为了行数把它搬走），由 `make-legacy` 生成的 `legacy.js` 顶部统一 import | ✅ 直接改（样式与组件） |
+| `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
+| `client.js`（包根） | 上面产物自动同步过来的副本，dsh 真正加载的那个 | ❌ 生成物 |
+| `cordis.patch.yml` | bundle patch，把本包挂进 profile | ✅ |
+| `locale/*.json` | 面板标题/描述等元数据 | ✅ |
+| `README.md` | 用户向文档（安装、功能、排障） | ✅ |
+| `docs/compatibility.md` | 我们对 dsh 宿主接口的依赖清单与升级 runbook | ✅ 改动宿主调用时必须同步 |
+| `docs/quickstart.md` | 第一天上手：clone → 测试 → 构建 → 部署 → 冒烟，每条都在全新 clone 上验过 | ✅ 命令变了就同步 |
+| `docs/publish.md` | 发布到 DSH 插件市场：发版、收录条目结构、自查清单 | ✅ 改发版流程时同步 |
+| `docs/history.md` | 按日期归档的实现流水账（体检、补完、UI 收尾），从 README 移出来的 | ✅ 只追加，不改历史 |
+| `docs/auth.md` | 登录与免登录（LDAP / 本地超管 / 会话落库），从 README 拆出来 | ✅ 改登录逻辑时同步 |
+| `docs/ui.md` | 界面实现记录（shadcn 对齐 / 构建链 / 布局一致性 / 暗色巡检） | ✅ 改前端构建或样式体系时同步 |
+
+## 2. 三个前端文件的关系（最容易搞错的地方）
+
+```
+client.src.js              手写源码
+      │  web/scripts/make-legacy.mjs  →  web/src/legacy.js
+      ▼
+web/src/**  ── vite build ──▶  dist/client.js  ── sync-client.mjs ──▶  根 client.js
+```
+
+- 改**前端逻辑** → `client.src.js`
+- 改**样式/组件/主题** → `web/src/**`
+- 改完一律在 `web/` 里构建：`pnpm build`（= `make-legacy` → `guard --pre` → `vite build` → `sync-client` → `guard --post`）
+- 构建后自检：`cmp -s dist/client.js client.js && echo same`，大小应约 700 KB（gzip ≈ 207 KB）
+
+> 曾经漏跑 `make-legacy`，`client.src.js` 的改动根本没进 bundle，白改好几轮。构建脚本已经把它串进 `build`，不要手工跳过。
+
+## 3. 构建与部署
+
+```bash
+# 1) 构建（Windows 上用随包 pnpm）
+cd dsh-ontology/web
+node C:/Users/hp/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/pnpm/bin/pnpm.cjs run build
+
+# 2) 部署：一条命令，传 index.js + dist/client.js + 整个 src/host，先备份再覆盖，最后自检
+cd ..
+DSH_DEPLOY_HOST=<host> DSH_DEPLOY_USER=<user> DSH_DEPLOY_PASSWORD=*** node tools/deploy.mjs
+#    没有密码就先用 --key 或 ssh-copy-id 授权本机公钥，再：node tools/deploy.mjs --dry-run 看它要传什么
+
+# 3) 冒烟：进面板 → 页签 → 看板有卡 → 用例库有行 → pageerror 必须为空
+ONTOLOGY_TOKEN=$(sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]*' | tail -1 | cut -d= -f2) \
+  node tools/visual/smoke.mjs
+```
+
+> `tools/deploy.mjs` 会打印 `active=` / `files=` / `state=`，`active` 不是 active 就以非零退出。
+> 它依赖 `ssh2`（devDependency，只给部署用，不进插件运行时）；`tools/mock-gitlab.mjs` 是本地 GitLab 打桩（三个接口，3 文件 / 3 提交），配合 `tools/verify-gitlab-facts.mjs` 可以在没有真实令牌时把「MR 事实 → 与自报值对账」整条链跑通：`node tools/mock-gitlab.mjs` + `ONTOLOGY_BASE=<host> node tools/verify-gitlab-facts.mjs`。
+
+`tools/visual/smoke.mjs` 依赖 `puppeteer-core`（同样只在 devDependencies 里），浏览器用系统 Chrome，可用 `CHROME_PATH` 指定。
+
+> 目标机上那个老的 `deploy-all.sh` 只作兜底（它拷 `/tmp/` 下的两个文件和 `src/`）。日常用 `tools/deploy.mjs`，别再手工 scp 拼路径。改了 `package.json`（包头、`engines`、`dsh.*`、`files`）、`cordis.patch.yml`、`locale/*.json` 时必须单独上传到插件目录（`~/dsh-ontology/` 或 profile 的 `node_modules` 下）再重启，否则改了个寂寞。改动前先 `cp package.json /tmp/package.json.bak` 留退路。
+>
+> 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher,executor,integrations,store}.js` 与 `/tmp/src/host/routes/*.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
+
+验收三件事：`systemctl is-active dsh-web` = `active`；浏览器打开 `http://<host>/` 侧栏出现「本体建模工作空间」；`GET /ontology-api/state` 返回 200 且 `revision` 递增。
+
+## 4. 每次改动前后的硬性检查
+
+1. `node --check index.js && node --check client.src.js`（语法；但**查不出**运行期 `ReferenceError`，见第 11 节）
+2. 构建后 `cmp` 两个 client.js 一致
+3. 服务端行为：写一个 `tmp/*.mjs`（或 `.py`）脚本直接打 `/ontology-api/*`，**不要在 PowerShell 里内联复杂 `node -e`**
+4. UI 行为：先跑 `node tools/visual/smoke.mjs`（部署后冒烟，见 §3）；要验具体功能就照它的写法加探针，必须
+   - 先点侧栏文字进入面板，再等 `[data-dsh-studio]`
+   - 切页签用 `elementHandle.click()`（Radix Tabs 不认 DOM `.click()`）
+   - 断言 DOM + `pageerror` 为空，并截图留档
+   - **能创建的东西必须有能用的路径**：新加一种对象或执行方式，要同时给「怎么建」和「怎么用」两个入口，探针必须走完「创建 → 使用 → 看到结果」。反例：2026-11-14 的 shell / 数据库用例，抽屉里建得出来，但「▶ 跑」按钮只认接口用例，另外两种永远跑不了——功能加了两天没人发现。
+   - **探针说「找不到元素」时，先截图再说**：面板崩掉时 React 的错误边界会把异常吞在自己的渲染树里，`pageerror` 是空的，页面上只有一行「工作空间渲染失败：xxx is not defined」。2026-11-13 连着两次把「页面崩了」误判成「选择器不对」，白跑两轮。截图 + `document.body.innerText.includes('渲染失败')` 才是判据。
+5. 涉及权限/门禁/发布的重改动，跑一遍既有 e2e 脚本并贴出数字
+6. `npm test`（条数以 `npm run check` 打印的为准，别再写死数字；覆盖范围是：`tests/repo.test.mjs` 管 manifest / 产物一致 / 宿主接口 / 领域层拆分与导入 / **导入只读绑定不许赋值** / **跨模块符号必须导入** / 迁移 / 文档 / locale / **用了 `React.` 的组件必须从 `client()` 或工厂参数拿到 `React`**；`tests/client-units.test.mjs` 用真实模块跑标签表/负责人/日期/命令面板检索这些纯函数；`tests/notify.test.mjs` 起一个本地 HTTP 桩验证飞书通知（正文归一、`botWants` 的事件矩阵、`feishuBroadcast` 只发给订阅该事件的机器人）；`tests/store-boot.test.mjs` 真的起一个 `StudioStore`，把「搬完代码启动就炸」这类问题挡在部署前。想连真数据验证：把生产库三个文件（`.db`/`-wal`/`-shm`）拷到临时目录，用 `new StudioStore()` + `await store.ready` 跑一遍，`tmp/boot-real.mjs` 就是这么写的）；`npm run check` = 语法 + 契约一把过
+7. 构建期守卫：`web/scripts/guard.mjs`（`pnpm build` 自动跑两次）——禁 CSS 里出现 `hsl(var(--x))`、禁 Radix Portal 不挂 `container={portalRoot()}`、产物里必须留下 `data-dsh-studio-portal`。单独跑：`cd web && npm run guard`
+8. 真库自检：`npm run smoke:store -- ~/.dsh/dsh-ontology.db`（把 `.db/-wal/-shm` 拷到临时目录起一遍真实 `StudioStore`，专抓「空库能起、真库就炸」的导入问题）
+9. 成本数字可疑时跑 `npm run verify:usage [taskId]`：ssh 取原始会话日志现算一遍 token，与 `/costs` 对账（两条路径不同：一条走 session-usage 的 zstd 缓存，一条走 usage.js 直接解析）。
+10. 发版后跑 `npm run verify:release`：比对 package.json 版本 / 本地 tag / origin main 与 tag / npm registry，不一致直接退出码 1。
+11. 全闭环自检：`ONTOLOGY_BASE=http://<host>:18080 node tools/e2e-loop.mjs [--k 3]`——真建一条需求和卡，跑完澄清门禁→评审→拆卡→各列→代码事实→用例→验收→版本发布；每步都是断言，`--k` 连跑 N 轮看成功率（每轮约 35 秒），任何一轮失败退出码非 0。
+    **默认跑完自动删除自己建的数据**（看结果加 `--keep`）。周检用 `npm run selfcheck`（= `--k 3`，连跑三轮看成功率）；定时任务在 2026-11-16 被用户主动删除，不要自动重建，需要时给一条 crontab：`0 9 * * 1 cd <repo> && npm run selfcheck`。
+12. 提示词 A/B：`node tools/prompt-ab.mjs --task <卡 id> --variant '一段追加提示词'` 先看计划（免费），`--setup-only` 验建/删专家通路（免费），`--run` 才真派两次单（花 token）。判据是用例通过数 / 代码事实 / 评论数 / 耗时。
+13. CI 在 `.github/workflows/ci.yml`：语法 → 契约 → `web/` 里 `pnpm install --frozen-lockfile && pnpm build` → `cmp dist/client.js client.js` → `git diff --exit-code`（产物必须可复现，改了前端忘记构建会直接红）
+
+## 4.5 需求澄清（比代码更靠前的一道门）
+
+- **不清楚就一直问，问到能一句话复述「交付什么、给谁用、怎么算完成」为止**。宁可多问三轮，也不要按猜测开工。
+- 平台上的三问（有没有服务端 / 鉴权谁做 / 交付边界）是**最低要求**，不是全部；答完仍不清楚的继续问。
+- **绝不把假设写成「遗留」**：遗留是双方认可的取舍，没问过的东西只能写成「待确认」，并且必须真的去确认。
+- 反例（2026-11-15）：把「管理后台」理解成只做前端 + 内存 mock，还把「无真实后端」写进签收记录当遗留——用户看到的是"说好了不做"，实际是"根本没问"。
+
+## 4.6 协作纪律（需求必须由专家做完，不是由脚本推完）
+
+- **一条需求 = 一串专家接力**：产品澄清 → 架构方案 → 研发实现 → 测试验证，每一棒都要在卡上留下
+  **评论 + 交付物 + 提交**。只改门禁状态、不派单的"流程演示"不算交付。
+- **禁止用 API 伪造执行过程**：直接写 `coding`（files/commits 全空）、直接标用例 pass、直接签字——
+  这叫"过流程"，不叫"做完"。真实需求一律走 `/agents/run` 派单。
+- **演示数据必须标明是演示**：脚本造的卡（`tools/e2e-loop.mjs`、各种 demo）要能一眼看出是自检，
+  不要混进真实需求的统计里（自检默认跑完自删）。
+- **需求正文要能独立看懂**：背景 / 目标 / 范围 / **不做** / 验收 / 风险，六段齐全；一句话描述的需求会被拆成一堆没法验收的卡。
+- 需求本身没有讨论区（没有 `requirement.comments`）：讨论发生在卡上，需求页看的是准出与矩阵。
+
+> 反例（2026-11-16）：为了演示"完整流程"，我用 API 直接建需求、直接 approve、直接写执行记录、直接签字，
+> 三张卡零评论零派单就"交付"了。用户一问"为什么讨论区没有多智能体内容"，才暴露这条路根本没走。
+> 同一轮还撞出真 bug：`buildExpertPrompt` 里裸引用了 `activeSkills`，**只要专家配了技能就派不出去**——
+> 因为演示从来没派过单，这个 bug 一直没被发现。
+
+## 5. 禁止事项
+
+- ❌ 手改 `dist/client.js` 或根 `client.js`（会被下次构建覆盖）
+- ❌ 直接在目标机上改文件而不回写仓库（下次部署即丢）
+- ❌ 用 `powershell -Command "node -e \"...\""` 这类多层引号跑逻辑；一律落成 `tmp/*.js|mjs|py`
+- ❌ 用 `split("\r\n")` 编辑 README（本仓库是混合行尾）：用 `split(/\r?\n/)`，写回统一 `\r\n`
+- ❌ 在 UI 线程里做「读样式 + 写属性」交替的批量循环（会触发强制同步布局，实测 685 ms 长任务）
+- ❌ 删除用户数据前不备份：先 `cp ~/.dsh/dsh-ontology.db /tmp/...`，再操作
+- ❌ 从 `index.js` 往外搬代码后不回查导入：`node --check` 查不出，只有 `import()` 与运行时才会炸（新增的契约测试会拦一类，见 §4）
+
+## 6. 后端约定（`index.js`）
+
+- **白名单四处**（原来写的三件套少算了一处，2026-11-13 因此丢过 `config.design`）：`defaultConfig()`、**`mergeConfig(saved)`——重启加载时按显式键列表重建配置，没列进去的键会被静默抹掉**、`mergeConfig(patch)`/`publicConfig()`（可写 / 对外可见）、`sanitizeX()`（每个对象）。契约测试 `config: every default key survives a merge round trip` 会拦住漏掉的那处。
+- `StudioStore.mutate(fn)` **返回整份 state**，不是 `fn` 的返回值；要拿某张卡用 `store.snapshot().tasks.find(...)`。
+- 所有对外状态走 `publicState()`：`{ revision, config, tasks, requirements, releases, experts, … }`。
+- 路由统一挂在 `/ontology-api`（`ctx.webServer.register({ kind:'prefix' })`）；新增路由记得同时更新权限分级 `accessLevelFor` 与 `/auth/*` 例外。
+- 迁移走 `config.schema` 版本号 + `#load()` 里的顺序迁移函数，禁止「就地猜测数据形状」。
+- 长任务（派单、GitLab 同步、飞书推送）不得阻塞请求线程；失败要写进任务 `history` 或审计，不许静默。
+- 拆出去的模块要宿主能力时，用 `configureDispatcher()/configureExecutor()/configureIntegrations()` 注入（`store.js` 不需要注入，只依赖 `domain.js`），**不要让子模块反向 import `index.js`**（会成环）；需要活值（如 `activeDispatcher`）用 getter 注入。
+
+## 7. 前端约定
+
+- `client.src.js` 是**无 JSX** 的 `h()` 写法；需要 Radix 组件时用 `kit('Tabs')` 等取，取不到必须能降级（宿主可能没给）。
+- 弹层一律用 Radix Portal，且容器**同时**带 `data-dsh-studio` 与 `data-dsh-studio-portal`，否则 `[data-dsh-studio]` 前缀的样式在弹层里全部失效（表现为「弹窗存在但看不见」）。
+- 样式优先级：legacy 的 `.ds-*` 运行时注入，晚于 head 里的 Tailwind；同特异性时 legacy 胜。要覆盖就提高特异性（`[data-dsh-studio] .x`）。
+- 颜色用**实色**，不要 `hsl(var(--primary))`（部分子树解析不到会让主按钮退化成纯文字）。
+- 深色主题靠 `[data-theme="dark"]` 覆盖 `--ds-*` 变量；新增面板要同时给浅/深两套背景与边框。
+- 表单统一用共享 `SideDrawer`；危险操作 `data-danger`，阻断/警示 `data-warn`，主行动 `ds-btn-primary`。
+
+## 8. 宿主接口约定
+
+- `export const inject = ['tools', 'systemPrompt']`；其它服务用 `ctx.inject([...], ctx => …)` 延迟获取，缺服务时整个插件不应崩。
+- 起会话必须三件齐全：`ctx.agents.create({ sessionId, meta:{ cwd }, agentOptions:{ provider, model }, setup })`，其中 `setup` 要 `agentPresets.resolve(id)` + `presets.mount(scope, id)`；随后 `agent.inject()` + `agent.followup(..., { source:{ kind:'user' } })` 才真正驱动一轮。
+- **模型在会话创建时固化**：改专家模型设置不影响已有会话，必须重启服务或删 `~/.dsh/sessions/<ws>/ontology-*` 才会重建。
+- 会话名固定 `ontology-<taskId>-<expertId>`；排障时直接读 `~/.dsh/sessions/…/session.v4.jsonl.zstd`（`zstd -dc`）。
+- 模型兜底不得跟随宿主默认（宿主默认在部分 provider 上没有可用通道，会 `503 No available channel`），统一走 `FALLBACK_AGENT_MODEL`。
+
+## 9. 数据与迁移
+
+- 真源：`~/.dsh/dsh-ontology.db`（`node:sqlite`，WAL，`meta.state` 存整份状态，保留 10 份快照）；`~/.dsh/dsh-ontology.json` 只是历史遗留。
+- 密钥：`~/.dsh/dsh-ontology.secrets.json`（0600）；不得写进 state、日志、README。
+- 技能库：`~/.dsh/skills/<name>/SKILL.md`，插件启动时 `syncAll()` 自愈。
+- 清库前必备份，清库后按场景重建（需求 → 功能点 → 卡 → 用例 → 交付物）。
+
+## 10. 提交与发布
+
+```bash
+git remote -v          # origin = ssh://git@ssh.github.com:443/Ding-6/dsh-ontology.git
+GIT_SSH_COMMAND="ssh -p 443" git push
+```
+- 一个提交只做一件事，标题一句话说清（英文或中文均可，与既有历史保持同风格）。
+- **改完即推，不在本地攒**：每完成一件事（一个提交）就 `git push`。攒着会让三处对不上——远端、目标机上跑的、以及仓库里的，别人 `git clone` 拿到的还是旧版。历史上曾经一口气攒了 18 个提交才推，属于反面案例。
+- 提交前确保根 `client.js` 与 `dist/client.js` 一致（clone 下来即可安装靠的就是这一点）。
+- 版本号在 `package.json`；发布标签 `vX.Y.Z`。
+
+### 发布前必做（硬性，缺一不许发）
+
+**每一次要发版（打 tag）之前，必须先把文档改完并一起提交。** 这条不是"尽量"，是门槛：
+用户看的是 README 和 npm 页面，不是 `git log`。历史教训：0.2.0~0.2.3 连着发了四版，
+README 里还写着旧行为（"安全边界"、"发版流程"、"探针清单"全都没有），版本号在三处
+文档里各说各的（`package.json 0.2.3` / `CHANGELOG 0.1.47` / `docs/compatibility.md 0.1.47`）。
+
+发布前逐项过一遍，缺哪项就补哪项：
+
+| 检查 | 位置 | 什么情况下必须改 |
+| --- | --- | --- |
+| 用户能感知的行为 | `README.md` | 新增/改变了功能、命令、默认值、限制、安装或发版方式 |
+| 更新日志 | `CHANGELOG.md` | 每个版本都要一条（只写用户能感知的，内部重构不写） |
+| 兼容性声明 | `docs/compatibility.md` | 版本号、宿主依赖、已验证的 DSH 版本 |
+| 界面/组件决策 | `docs/ui.md` | 换了组件、改了样式体系、新增本地补丁 |
+| 探针清单 | `README.md` 的「质量闸门」 | 新增 `verify:*` / `review:*` 脚本 |
+| 一致性（文档） | `npm run release:check` | 校验 CHANGELOG 有本版条目、compatibility 版本号一致、README 提到的脚本都存在；**若自上个 tag 以来改了代码却没改 README，直接失败** |
+| 一致性（发版） | `GIT_SSH_COMMAND="ssh -p 443" npm run verify:release` | 必须「发版一致」才算完 |
+
+顺序固定：**改代码 → 改文档 → `npm test` → 构建并 `cmp` 产物 → 提交 → 打 tag → 推 tag**。
+脚本改了但文档没改，等于把"怎么用"的答案留在上一个版本里。
+
+## 11. 常见故障速查
+
+| 现象 | 先查这里 |
+| --- | --- |
+| 页面白屏 | 浏览器 console 的 `ReferenceError`（`node --check` 抓不到）；派生变量必须 null 兜底 |
+| 面板里一行「渲染失败：xxx is not defined」 | 组件里引用了当前作用域没有的变量（典型：把 `state.tasks` 写成 `tasks`）。`pageerror` 不会有记录，只能靠截图或 `innerText` 里找「渲染失败」 |
+| 改了没生效 | 是否改了 `client.src.js` 却没跑 `make-legacy`；`cmp` 确认产物；浏览器强刷 |
+| 主按钮只剩文字 | 是否又用了 `hsl(var(--primary))`；改实色 |
+| 弹窗/抽屉看不见 | Portal 容器是否缺 `data-dsh-studio` 属性 |
+| 拖拽没反应 | 卡片是否有 `draggable`、列上是否有 `onDragOver/onDrop`、路由是否是 `/task/update` |
+| 服务每 5 分钟自杀一次 | 定时器里给**导入绑定**赋值（`larkProbeCache = …`）：ESM 导入只读，抛 `Assignment to constant variable`；改成调 `invalidateLarkProbe()` 这类 setter |
+| 点击页面卡顿 | DevTools Performance 找长任务；`keyboardPatch` 之类全量扫描是历史元凶 |
+| 派单没留言 | 会话日志里找 `turn/end reason.kind=error`；常见是模型无可用通道（503） |
+| 保存成功但字段为空 | `publicConfig`/`mergeConfig`/`sanitize*` 白名单漏字段 |
+| 测完失败路径改动没生效 | 用 `git checkout -- package.json` 还原测试用的假版本，会把**同一个文件里**刚加的其它改动一起还原。还原后 `grep` 一下你新加的那行还在不在 |
+| 用脚本改文档后「什么都没变」 | 生成脚本文本里带了反引号，把模板字符串截断了：Node 抛 `ReferenceError: xxx is not defined` 但**编辑一句都没执行**。改完看 `git status`，别只看脚本退出码 |
