@@ -237,7 +237,7 @@
 | POST | `/ontology/review` | 专家校准（`kind` `id` `decision` `note` `by`） |
 | POST | `/ontology/container` · `/ontology/container/delete` | 新建 / 删除本体容器 |
 | POST | `/ontology/blueprint` | 生成应用蓝图 |
-| POST | `/ontology/templates`（GET）· `/ontology/template` | 领域骨架清单 / 实例化骨架 |
+| GET | `/ontology/templates` · POST | `/ontology/template` | 领域骨架清单 / 实例化骨架（`templateId` + `by`） |
 | POST | `/ontology/guide` · `/ontology/guide/delete` · `/ontology/guide/search` | 存入手册 / 删手册 / 检索 |
 | GET / POST | `/ontology/guide/book` | 内置手册书信息 / 载入到手册库 |
 | POST | `/ontology/import` | 导入台账（整体替换） |
