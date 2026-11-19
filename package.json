@@ -1,6 +1,6 @@
 {
   "name": "@ding-6/dsh-ontology",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "DSH Ontology: a general-purpose ontology application development copilot in DSH — model objects / relations / rules / actions (AI drafts, experts calibrate), turn them into data models, rules engines, APIs, frontends and test plans, and teach the platform manual by searching the built-in handbook.",
   "main": "index.js",
@@ -50,6 +50,7 @@
     "verify:login": "node tools/visual/login-probe.mjs",
     "verify:facts": "node tools/visual/facts-probe.mjs",
     "verify:ontology": "node tools/visual/ontology.mjs",
+    "sync:live": "node tools/sync-live.mjs",
     "release:check": "node tools/release-check.mjs"
   },
   "exports": {

@@ -45,7 +45,7 @@ ONTOLOGY_TOKEN=<面板 token> ONTOLOGY_BASE=http://<host>:18080 node tools/visua
 
 九项检查：能打开 → 侧栏进得去 → 面板挂载 → 九个页签（含语义层）→ 看板有卡 → 语义层有统计盒 → 校验页有用例行 → `pageerror` 必须为空。任何一项不过退出码非零。
 
-语义层的端到端（导入样例本体 → 缺口检查 → 生成 MCP 封装 → 人工登记 AI 草稿 → 专家校准为「已确认」）另有一条探针：
+语义层的端到端（空台账 → 人工登记 AI 草稿 → 专家校准为「已确认」 → 缺口检查 → 领域骨架 → 应用蓝图 → 生成 MCP 封装）另有一条探针：
 
 ```bash
 ONTOLOGY_TOKEN=<面板 token> ONTOLOGY_BASE=http://<host>:18080 node tools/visual/ontology.mjs

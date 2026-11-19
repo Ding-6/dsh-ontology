@@ -1262,18 +1262,13 @@ test('ontology: platform manuals can be stored and searched', async () => {
   assert.ok(hit, 'guides must keep their body so the advisor can quote the platform manual')
 })
 
-test('ontology: the sample business ontology matches the published scale', async () => {
-  const { seedOntology } = await import('../src/host/ontology-seed.js')
-  const { ontologyStats, ontologyCoverage } = await import('../src/host/ontology.js')
-  const seed = seedOntology()
-  const stats = ontologyStats(seed)
-  assert.equal(stats.objects, 46, 'sample ontology must have 46 objects')
-  assert.equal(stats.attributes, 65, 'sample ontology must have 65 attributes')
-  assert.equal(stats.relations, 54, 'sample ontology must have 54 relations')
-  assert.equal(stats.rules, 29, 'sample ontology must have 29 rules')
-  assert.ok(stats.actions >= 10, 'sample ontology must expose callable actions')
-  const coverage = ontologyCoverage(seed)
-  assert.equal(coverage.issues, 0, 'sample ontology must not ship dangling relations or empty rules')
+test('ontology: the shipped plugin ships no sample business data', async () => {
+  const { emptyOntology, ontologyStats } = await import('../src/host/ontology.js')
+  const stats = ontologyStats(emptyOntology())
+  assert.equal(stats.objects, 0, 'the plugin must ship an empty ontology ledger')
+  assert.equal(stats.relations, 0, 'the plugin must ship no sample relations')
+  assert.equal(stats.rules, 0, 'the plugin must ship no sample rules')
+  assert.equal(stats.actions, 0, 'the plugin must ship no sample actions')
 })
 
 test('ontology: drafts need expert calibration before the gate opens', async () => {
@@ -1383,7 +1378,7 @@ test('host: the semantic layer is reachable and its write paths are wired', () =
   assert.ok(host.includes('handleOntologyRoute'), 'the ontology route handler must be mounted')
   assert.ok(host.includes('configureOntologyRoutes'), 'the ontology route handler must receive the host services')
   const routes = read('src/host/routes/ontology.js')
-  for (const route of ['/ontology', '/ontology/export', '/ontology/asset', '/ontology/review', '/ontology/seed', '/ontology/service', '/ontology/container', '/ontology/blueprint', '/ontology/template', '/ontology/guide', '/ontology/guide/search', '/ontology/guide/book']) {
+  for (const route of ['/ontology', '/ontology/export', '/ontology/asset', '/ontology/review', '/ontology/service', '/ontology/container', '/ontology/blueprint', '/ontology/template', '/ontology/guide', '/ontology/guide/search', '/ontology/guide/book']) {
     assert.ok(routes.includes(route), `ontology route ${route} is missing`)
   }
   assert.ok(read('src/host/access.js').includes("'/ontology/service'"), 'service packaging must stay a read-only operation')

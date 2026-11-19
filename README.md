@@ -101,8 +101,10 @@ flowchart LR
   只给结构骨架（对象 / 关系 / 规则 / 行动），**不含行业业务数据**；实例化后是「AI 草稿」，你按自己的业务改。
 - **平台操作手册库**：内置《智元·本体智能体平台操作手册 V2.0》（86 个章节，随包分发），点「载入到手册库」即可被检索；你自己的平台手册用「存入手册」加进同一本库。专家用 `ontology_guide_search` 检索后照手册教你操作，不会编造平台步骤。
 
-想先看整体规模，点「并入可选示例」会灌一份商企市场本体（46 个对象 / 65 个属性 / 54 条关系 / 29 条规则 / 10 个行动），
-可导出 JSON 对照；**它是可选示例，默认不导入，也不会自动进你的本体**。
+**插件出厂是空的**：语义层台账里没有任何示例业务数据（0 对象 / 0 关系 / 0 规则 / 0 行动），
+对象 / 关系 / 规则 / 行动都由你自己添加 —— 要么在语义层面板里手工登记（落成 AI 草稿，再让专家校准为「已确认」），
+要么用「领域骨架模板」生成骨架再按自己的业务改，要么从 JSON 导入。
+想知道整体规模，点「应用蓝图」，它会按**你的**台账生成数据模型、规则引擎与接口方案。
 
 ## 它长什么样
 
@@ -225,7 +227,7 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 | 命令 | 覆盖 |
 | --- | --- |
 | `npm run verify:pages` | 8 个页面（含语义层）能进、能渲染、页签高亮、无 pageerror（25 项） |
-| `npm run verify:ontology` | **语义层端到端**（33 项）：并入可选示例（46 对象 / 65 属性 / 54 关系 / 29 规则 / 10 行动）→ 缺口与闸门跟服务端对账 → 多本体 / 建模建议 / 领域骨架生成骨架 → 应用蓝图三章 → 存入手册并检索命中 → 载入内置手册书（86 章节）并检索命中 → MCP 封装 → 人工登记 AI 草稿 → 专家校准为「已确认」并留结论 → 探针数据自清理 |
+| `npm run verify:ontology` | **语义层端到端**（33 项）：空台账起步 → 人工登记 AI 草稿 → 专家校准为「已确认」并留结论 → 缺口与闸门跟服务端对账 → 多本体 / 建模建议 / 领域骨架生成骨架 → 应用蓝图三章 → 存入手册并检索命中 → 载入内置手册书（86 章节）并检索命中 → MCP 封装 → 探针数据自清理 |
 | `npm run verify:audit` | **27 个模块**（8 页签 + 16 设置面板 + 3 抽屉）里还有没有原生下拉/原生输入/老按钮（违规必须为 0） |
 | `npm run verify:selects` | 下拉是否都是官方组件、尺寸是否合规范、弹层是否真的在最上层 |
 | `npm run verify:drawer` | 抽屉打开/聚焦/Esc/取消（15 项） |
@@ -265,6 +267,7 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 | 发版到插件市场 | [docs/publish.md](docs/publish.md) |
 | 宿主接口依赖与升级 runbook | [docs/compatibility.md](docs/compatibility.md) |
 | **本体开发指南**（从业务分析到蓝图的完整用法） | [docs/ontology-guide.md](docs/ontology-guide.md) |
+| **操作手册**（面板怎么用：页签、语义层、看板流程、API 速查、数据备份与清空） | [docs/manual.md](docs/manual.md) |
 | 过程记录（按日期的实现流水账） | [docs/history.md](docs/history.md) |
 | 每个版本改了什么 | [CHANGELOG.md](CHANGELOG.md) |
 
@@ -275,6 +278,7 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 上手第一天（三条命令，已在全新 clone 上验证过）：[docs/quickstart.md](docs/quickstart.md)
 发布到插件市场（npm / GitHub 发版 + 收录条目 + 自查清单）：[docs/publish.md](docs/publish.md)
 - 依赖的 dsh 宿主接口、升级 runbook、兼容矩阵与已知限制：[docs/compatibility.md](docs/compatibility.md)
+- 本机（Windows 桌面宿主）改了代码怎么让它生效：`npm run sync:live`（宿主按真实文件 URL 缓存 ESM 模块，换路径才重新 import；细节见 [AGENTS.md](AGENTS.md) §3.1）
 
 ## 已知限制
 

@@ -139,12 +139,6 @@ export function OntologyPage({ state }) {
     await act('/ontology/asset/delete', { kind: one, id: asset.id }, `已删除「${asset.name}」`)
   }
 
-  async function seed() {
-    const ok = await confirmDialog('并入可选示例本体（商企市场骨架：46 个对象 / 65 个属性 / 54 条关系 / 29 条规则）？你已有的资产不会被清掉。', { title: '导入可选示例', okText: '导入' })
-    if (ok !== true) return
-    await act('/ontology/seed', {}, '示例本体已并入')
-  }
-
   async function exportJson() {
     try {
       const out = await api(`/ontology/export${scope === '' ? '' : `?ontologyId=${encodeURIComponent(scope)}`}`)
@@ -391,7 +385,6 @@ export function OntologyPage({ state }) {
         }),
       ),
       h('div', { className: 'ds-action-bar-right' },
-        h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void seed() }, '并入可选示例'),
         h('button', { className: 'ds-btn ds-btn-ghost', disabled: busy, onClick: () => void exportJson() }, '导出 JSON'),
         h('button', { className: 'ds-btn', disabled: busy, onClick: () => void refresh() }, '刷新'),
       ),

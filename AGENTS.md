@@ -7,7 +7,7 @@
 | 路径 | 是什么 | 谁能改 |
 | --- | --- | --- |
 | `index.js` | 宿主半边：`apply(ctx)`、50 个 `ontology_*` 工具、`/ontology-api/*` 路由、SQLite 存储、派单引擎、门禁 | ✅ 直接改 |
-| `src/host/*.js` | 宿主层模块：`cases.js`（跨卡用例聚合与回归汇总：`collectCases` / `groupCaseKeys` / `summarizeRun`，纯函数）、`team-memory.js`（专家团的团级记忆，存 side 键）、`quality.js`（AI 质量：返工识别与按专家汇总，纯函数）、`gitlab-facts.js`（执行记录 vs MR 事实的对账，纯函数）、`impact.js`（需求改版的影响面：受影响的卡与要重跑的用例，纯函数）、`design.js`（设计评审记录与进开发前的闸门，纯函数）、`shell-runner.js`（shell 用例执行器，默认关闭）、`shell-case.js`（shell 用例的数据形状，纯函数）、`runners.js`（用例执行器注册表：match + run，加新执行方式不用动 runOneCase）、`limits.js`（数量上限的默认值与清洗，可配置）、`db-runner.js`（SQLite 用例执行器与数据形状，默认关闭）、`discovery.js`（需求澄清必答项与拆卡门禁，纯函数）、`override.js`（绕过准出的结构化记录，纯函数）、`bugs.js`（失败用例 → 缺陷卡严重级别，纯函数）、`bitable.js`（卡片 → 飞书多维表格记录，分批 200，纯函数）、`context-insight.js`（上下文洞察：窗口峰值 / 回合 / 工具 / 重试 / 压缩点，纯函数）、`artifact-image.js`（交付物截图读取：只认白名单目录与图片扩展名）、`lark-doc.js`（飞书文档正文解析：把 lark-cli 的 fetch 输出变成 {ok,title,text,error}，纯函数）、`usage.js`（会话用量解析与计价，纯函数）、`session-usage.js`（读 session.v4 日志并按卡/专家汇总）、`events.js`（进程内事件总线，同步扇出）、`webhooks.js`（事件 → 出站 webhook，失败不重试）、`access.js`（权限判定：`checkAccess` / `accessLevelFor` / `READ_ONLY_POST_ROUTES`，纯函数；超管豁免只认服务端认定的身份、名字精确匹配）、`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`roles.js`（四位本体角色的出厂设定：业务/架构/建模/校验 + 各自提示词，纯函数）、`paths.js`（`dshHomePath` / `dataPath` 改名兼容 / `skillsRoot` / `isSkillName`，纯函数）、`ontology.js`（统一语义层台账：8 类资产（对象/关系/规则/行动/术语/实例/形状/应用）+ 多本体容器 + 建模建议器 + MCP/SDK 生成，纯函数）、`ontology-seed.js`（可选示例本体（商企市场 46 对象/65 属性/54 关系/29 规则/10 行动），默认不导入，纯数据）、`ontology-templates.js`（8 套领域骨架模板 general/industrial/safety/health/defense/geo/finance/knowledge，只给结构不给行业数据 + `applyOntologyTemplate`，纯数据）、`ontology-blueprint.js`（应用蓝图：数据模型/规则引擎/API 契约/前端设计/本体驱动/测试方案六章，纯函数）、`ontology-guide-book.js`（内置平台操作手册书：86 个章节，随插件分发，可一键载入手册库并按关键词检索，纯数据）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`store.js`（`StudioStore`/`SecretStore`：SQLite 台账 + 快照 + 登录会话）、`integrations.js`（GitLab / 飞书 / 平台健康）、`routes/*.js`（按前缀拆出的 HTTP 处理：`exports.js` 导出 CSV、`auth.js` 统一登录、`tasks.js` 卡片/专家/列、`requirements.js` 需求/文档/公开提单、`releases.js` 版本/灰度/部署、`insights.js` 指标与工作台、`state.js` `/state` 的 ETag 与 304、`skills.js` 技能库读写上传、`admin.js` 配置/权限成员/审计/快照、`connect.js` 市场/集成健康/GitLab/仓库/飞书、`agents.js` 派单运行态与起停、`coding.js` 执行记录/失败重试/worktree/项目配置、`ontology.js` 语义层读写（台账/校准/导入/服务封装/建模建议/应用蓝图/模板/手册/多本体）、`tools.js` 50 个 `ontology_*` 工具） | ✅ 直接改，新逻辑优先放这里 |
+| `src/host/*.js` | 宿主层模块：`cases.js`（跨卡用例聚合与回归汇总：`collectCases` / `groupCaseKeys` / `summarizeRun`，纯函数）、`team-memory.js`（专家团的团级记忆，存 side 键）、`quality.js`（AI 质量：返工识别与按专家汇总，纯函数）、`gitlab-facts.js`（执行记录 vs MR 事实的对账，纯函数）、`impact.js`（需求改版的影响面：受影响的卡与要重跑的用例，纯函数）、`design.js`（设计评审记录与进开发前的闸门，纯函数）、`shell-runner.js`（shell 用例执行器，默认关闭）、`shell-case.js`（shell 用例的数据形状，纯函数）、`runners.js`（用例执行器注册表：match + run，加新执行方式不用动 runOneCase）、`limits.js`（数量上限的默认值与清洗，可配置）、`db-runner.js`（SQLite 用例执行器与数据形状，默认关闭）、`discovery.js`（需求澄清必答项与拆卡门禁，纯函数）、`override.js`（绕过准出的结构化记录，纯函数）、`bugs.js`（失败用例 → 缺陷卡严重级别，纯函数）、`bitable.js`（卡片 → 飞书多维表格记录，分批 200，纯函数）、`context-insight.js`（上下文洞察：窗口峰值 / 回合 / 工具 / 重试 / 压缩点，纯函数）、`artifact-image.js`（交付物截图读取：只认白名单目录与图片扩展名）、`lark-doc.js`（飞书文档正文解析：把 lark-cli 的 fetch 输出变成 {ok,title,text,error}，纯函数）、`usage.js`（会话用量解析与计价，纯函数）、`session-usage.js`（读 session.v4 日志并按卡/专家汇总）、`events.js`（进程内事件总线，同步扇出）、`webhooks.js`（事件 → 出站 webhook，失败不重试）、`access.js`（权限判定：`checkAccess` / `accessLevelFor` / `READ_ONLY_POST_ROUTES`，纯函数；超管豁免只认服务端认定的身份、名字精确匹配）、`domain.js`（板列/数据形状/`sanitize*`/默认配置，纯函数）、`roles.js`（四位本体角色的出厂设定：业务/架构/建模/校验 + 各自提示词，纯函数）、`paths.js`（`dshHomePath` / `dataPath` 改名兼容 / `skillsRoot` / `isSkillName`，纯函数）、`ontology.js`（统一语义层台账：8 类资产（对象/关系/规则/行动/术语/实例/形状/应用）+ 多本体容器 + 建模建议器 + MCP/SDK 生成，纯函数）、`ontology-templates.js`（8 套领域骨架模板 general/industrial/safety/health/defense/geo/finance/knowledge，只给结构不给行业数据 + `applyOntologyTemplate`，纯数据）、`ontology-blueprint.js`（应用蓝图：数据模型/规则引擎/API 契约/前端设计/本体驱动/测试方案六章，纯函数）、`ontology-guide-book.js`（内置平台操作手册书：86 个章节，随插件分发，可一键载入手册库并按关键词检索，纯数据）、`dispatcher.js`（派单引擎）、`executor.js`（用例执行、代码事实核对、健康检查）、`store.js`（`StudioStore`/`SecretStore`：SQLite 台账 + 快照 + 登录会话）、`integrations.js`（GitLab / 飞书 / 平台健康）、`routes/*.js`（按前缀拆出的 HTTP 处理：`exports.js` 导出 CSV、`auth.js` 统一登录、`tasks.js` 卡片/专家/列、`requirements.js` 需求/文档/公开提单、`releases.js` 版本/灰度/部署、`insights.js` 指标与工作台、`state.js` `/state` 的 ETag 与 304、`skills.js` 技能库读写上传、`admin.js` 配置/权限成员/审计/快照、`connect.js` 市场/集成健康/GitLab/仓库/飞书、`agents.js` 派单运行态与起停、`coding.js` 执行记录/失败重试/worktree/项目配置、`ontology.js` 语义层读写（台账/校准/导入/服务封装/建模建议/应用蓝图/模板/手册/多本体）、`tools.js` 50 个 `ontology_*` 工具） | ✅ 直接改，新逻辑优先放这里 |
 | `client.src.js` | 浏览器半边的手写源码（通过 `window.__ModuleLoader__` 注册面板） | ✅ 直接改（前端逻辑） |
 | `web/src/**` | shadcn/Radix 组件、样式、`legacy.js` 桥；`web/src/studio/*.js` 是从 `client.src.js` 抬出来的纯模块（`markdown.js` 渲染器、`format.js` 日期格式、`labels.js` 标签表、`roster.js` 负责人与候选人、`fields.js` 表单适配层、`shell.js` 共享抽屉、`card.js` 看板卡片、`board.js` 看板本体、`mentions.js` @ 选择器、`cases.js` 多步用例解析、`drawer.js` 卡片详情抽屉、`editor.js` 通用编辑器、`palette.js` 命令面板（⌘K 全局搜索卡片/需求/版本/专家/专家团/项目/技能 + 动作项 + Ctrl/⌘+Alt+Shift+N/T/D 全局快捷键；带 Shift 是为了避开宿主的 Ctrl+Alt+N 新会话）、`charts.js` 进度条与燃尽图、`context.js` 共享上下文（`provideClient`/`client`）、`panels/*.js` 设置页 17 个面板、`pages/*.js` 六个页面组件（看板之外的工作台/需求/用例/版本/效能/自助提单）；**`StudioPage` 是组合根，故意留在 `client.src.js`**，它负责顶栏、页签与「＋ 新建」菜单并调用 `provideClient()`，别为了行数把它搬走），由 `make-legacy` 生成的 `legacy.js` 顶部统一 import | ✅ 直接改（样式与组件） |
 | `dist/client.js` | `pnpm build` 的产物（单文件 IIFE，注意在仓库根 `dist/`，不是 `web/dist/`） | ❌ 生成物 |
@@ -21,6 +21,8 @@
 | `docs/history.md` | 按日期归档的实现流水账（体检、补完、UI 收尾），从 README 移出来的 | ✅ 只追加，不改历史 |
 | `docs/auth.md` | 登录与免登录（LDAP / 本地超管 / 会话落库），从 README 拆出来 | ✅ 改登录逻辑时同步 |
 | `docs/ui.md` | 界面实现记录（shadcn 对齐 / 构建链 / 布局一致性 / 暗色巡检） | ✅ 改前端构建或样式体系时同步 |
+| `docs/manual.md` | 用户向《本体开发工作台 操作手册》：页签导览、语义层八类资产、看板流程、工具与 API 速查、数据备份与清空 | ✅ 改用户可感知的操作方式时同步 |
+| `docs/ontology-guide.md` | 本体开发指南（方法论：从业务分析到应用蓝图） | ✅ 改建模方法论时同步 |
 
 ## 2. 三个前端文件的关系（最容易搞错的地方）
 
@@ -65,6 +67,23 @@ ONTOLOGY_TOKEN=$(sudo journalctl -u dsh-web -n 50 | grep -o 'token=[A-Za-z0-9_-]
 > 宿主拆成 `src/host/*.js` 以后，**部署必须带整个 `src/` 目录**：`/tmp/index.js`、`/tmp/client.js`、`/tmp/src/host/{domain,dispatcher,executor,integrations,store}.js` 与 `/tmp/src/host/routes/*.js`。只传 `index.js` 会得到 `ReferenceError: sanitizeAccess is not defined`（服务 502）。
 
 验收三件事：`systemctl is-active dsh-web` = `active`；浏览器打开 `http://<host>/` 侧栏出现「本体建模工作空间」；`GET /ontology-api/state` 返回 200 且 `revision` 递增。
+
+### 3.1 本机（Windows 桌面宿主）改了代码怎么让它生效
+
+宿主按**真实文件 URL** 缓存 ESM 模块（`loadCache` 的键是不带 query 的文件 URL）。
+同一个路径上改文件，宿主**不会**重新 import —— 症状是「代码改了不生效」，清缓存没用。
+
+```bash
+node tools/sync-live.mjs            # 仓库 → 活路径（默认 ~/Downloads/dsh-ontology-live）+ 重指 profile 依赖与 junction
+node tools/sync-live.mjs --dry-run  # 只看要做什么
+```
+
+- 换路径只解决「模块被缓存」这一半；bundle 的 include 树还缓存着已加载的 entry。
+  不重启 DSH 的做法：把 profile `package.json` 里 `dsh.profile.bundles` 中那个包名摘掉 → 等 4 秒 → 再加回去 → 等 5 秒。
+- 手工 `ctx.loader.create({name})` 建第二个实例会撞 `prompt section "ontology-protocol" is already registered`；
+  `entry.parent.remove(entry.id, true)` 对 include 树管理的 entry 无效（会被立刻重建）。
+- 桌面 profile 由 Electron 应用独占，`dsh.cmd --profile desktop --port <p>` 起不了第二个实例；
+  想开独立实例验证只能用 web profile。
 
 ## 4. 每次改动前后的硬性检查
 

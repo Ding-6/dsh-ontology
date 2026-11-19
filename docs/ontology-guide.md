@@ -189,6 +189,7 @@
 
 ## 相关文档
 
+- **操作手册（怎么用这个面板）**：[manual.md](manual.md)
 - 面板与配置说明：[README.md](../README.md)
 - 宿主接口依赖与升级：[compatibility.md](compatibility.md)
 - 界面实现记录：[ui.md](ui.md)

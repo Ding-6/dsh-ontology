@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * 本体语义层端到端探针：并入可选示例本体 → 领域骨架模板 → 应用蓝图 → 平台操作手册库
+ * 本体语义层端到端探针：空台账起步（出厂无示例数据）→ 领域骨架模板 → 应用蓝图 → 平台操作手册库
  * → 生成 MCP 服务封装 → 人工登记一条资产（AI 草稿）→ 专家校准通过（已确认）。
  * 断言 DOM 文本 + pageerror 为空，并截图留档。
  *
  * 用法：
- *   node tools/visual/ontology.mjs --base http://127.0.0.1:53024 --cookie-file tmp/auth-cookie.txt
+ *   node tools/visual/ontology.mjs --base http://127.0.0.1:63610 --cookie-file tmp/auth-cookie.txt
  *   ONTOLOGY_TOKEN=xxxx node tools/visual/ontology.mjs --base http://<host>:18080
  *
  * 鉴权两种：
@@ -138,24 +138,17 @@ try {
   ok('语义层页签渲染（统计盒/缺口检查）', panelText.includes('缺口检查') && panelText.includes('业务对象'))
   await page.screenshot({ path: 'tmp/ontology-01-semantics-empty.png' })
 
-  // 3) 并入可选示例本体
-  const beforeObjects = Number(await statValue('业务对象') ?? 0)
-  await clickText('并入可选示例')
-  await sleep(800)
-  const confirmBtn = await findByText('导入', { tag: 'button' })
-  ok('导入确认弹窗出现', !!confirmBtn)
-  await confirmBtn.click()
-  await sleep(2500)
-  const objects = await statValue('业务对象')
-  const attrs = await statValue('属性')
-  const rels = await statValue('对象关系')
-  const rules = await statValue('业务规则')
-  const actions = await statValue('可调用行动')
-  ok('可选示例并入：对象 ≥ 46 / 关系 ≥ 54 / 规则 ≥ 29 / 行动 ≥ 10',
-    Number(objects) >= 46 && Number(rels) >= 54 && Number(rules) >= 29 && Number(actions) >= 10,
-    `${objects}/${attrs}/${rels}/${rules}/${actions}`)
-  ok('示例是「并入」而不是覆盖（对象数只增不减）', Number(objects) >= beforeObjects)
+  // 3) 出厂不带示例数据：没有「并入可选示例」入口，台账里也没有样例本体
   const after = await page.evaluate(() => document.querySelector('[data-dsh-studio]')?.innerText ?? '')
+  ok('语义层没有「并入可选示例」入口', !after.includes('并入可选示例'))
+  ok('出厂不带示例业务数据（无商企市场样例）', !after.includes('商企市场'))
+  const objects0 = await statValue('业务对象')
+  const rels0 = await statValue('对象关系')
+  const rules0 = await statValue('业务规则')
+  const actions0 = await statValue('可调用行动')
+  ok('台账统计格齐全（对象/关系/规则/行动）',
+    [objects0, rels0, rules0, actions0].every(v => v !== null),
+    `${objects0}/${rels0}/${rules0}/${actions0}`)
   // 缺口与闸门都拿服务端真值对账：台账里有多少缺口就显示多少，闸门该拦就拦。
   const truth = await page.evaluate(async () => {
     const res = await fetch('/ontology-api/ontology')
@@ -172,7 +165,7 @@ try {
     ? after.includes('语义层可以对外提供能力')
     : truth.blockers.some(b => after.includes(b)),
     truth.ready ? 'ready' : truth.blockers.join(' | '))
-  await page.screenshot({ path: 'tmp/ontology-02-seed-loaded.png' })
+  await page.screenshot({ path: 'tmp/ontology-02-empty-ledger.png' })
 
   // 3b) 通用化面板都在：多本体 / 建模建议 / 领域骨架 / 应用蓝图 / 操作手册
   ok('多本体容器面板存在', after.includes('本体（可多本体并存）'))

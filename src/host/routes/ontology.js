@@ -6,7 +6,6 @@
  */
 import {
   emptyOntology,
-  ONTOLOGY_KIND_LIST,
   ontologyCoverage,
   ontologyGate,
   ontologyMcpTools,
@@ -24,7 +23,6 @@ import {
 import { ontologyBlueprint } from '../ontology-blueprint.js'
 import { applyGuideBook, GUIDE_BOOK, searchGuideBook } from '../ontology-guide-book.js'
 import { applyOntologyTemplate, ONTOLOGY_TEMPLATES } from '../ontology-templates.js'
-import { seedOntology } from '../ontology-seed.js'
 
 const INJECTED = ['sendJson', 'readJsonBody', 'publicState']
 
@@ -279,22 +277,6 @@ export async function handleOntologyRoute({ method, route, req, res, store, url 
     const body = await host.readJsonBody(req)
     const raw = body.ontology ?? body
     const ontology = sanitizeOntology(raw)
-    await store.mutate(state => {
-      state.ontology = ontology
-    })
-    host.sendJson(res, 200, withMeta(store, ontology))
-    return true
-  }
-
-  if (route === '/ontology/seed') {
-    // 样例只是可选参考：并入当前台账，不清掉用户已有的本体。
-    const seed = sanitizeOntology(seedOntology())
-    let ontology = current(store)
-    for (const kind of ['object', 'relation', 'rule', 'action']) {
-      for (const asset of seed[ONTOLOGY_KIND_LIST[kind]] ?? []) {
-        ontology = upsertOntologyAsset(ontology, kind, asset, '样例')
-      }
-    }
     await store.mutate(state => {
       state.ontology = ontology
     })
