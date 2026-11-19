@@ -23,13 +23,19 @@ import {
 import { ontologyBlueprint } from '../ontology-blueprint.js'
 import { applyGuideBook, GUIDE_BOOK, searchGuideBook } from '../ontology-guide-book.js'
 import { applyOntologyTemplate, ONTOLOGY_TEMPLATES } from '../ontology-templates.js'
+import { buildPlan, planSummary, planToCards } from '../planner.js'
+import { BUILTIN_SKILLS } from '../ontology-skills.js'
 
-const INJECTED = ['sendJson', 'readJsonBody', 'publicState']
+const INJECTED = ['sendJson', 'readJsonBody', 'publicState', 'createTask', 'saveRequirement', 'saveSkill', 'hasSkill']
 
 let host = {
   sendJson: () => {},
   readJsonBody: async () => ({}),
   publicState: () => ({}),
+  createTask: async () => undefined,
+  saveRequirement: async () => undefined,
+  saveSkill: async () => undefined,
+  hasSkill: () => false,
 }
 
 /** 注入宿主能力。 */
@@ -120,6 +126,90 @@ export async function handleOntologyRoute({ method, route, req, res, store, url 
         count: sections.length,
       },
       sections,
+    })
+    return true
+  }
+
+  if (route === '/ontology/plan' && method === 'POST') {
+    // 规划器：一句业务描述 → 阶段计划 + 每步规范 + 验收标准 + 初定版本。
+    const body = await host.readJsonBody(req)
+    const plan = buildPlan({
+      title: body.title,
+      business: body.business,
+      domain: body.domain,
+      templateId: body.templateId,
+    })
+    const summary = planSummary(plan)
+    if (body.apply !== true) {
+      host.sendJson(res, 200, { ok: true, plan, summary })
+      return true
+    }
+    const requirement = await host.saveRequirement(store, {
+      title: plan.title,
+      description: summary,
+      domain: plan.domain,
+      status: 'active',
+      by: String(body.by ?? '规划器'),
+    })
+    const cards = []
+    for (const card of planToCards(plan)) {
+      const task = await host.createTask(store, {
+        title: card.title,
+        type: card.type,
+        requirement: card.requirement,
+        role: card.role,
+        status: card.column,
+        requirementId: requirement?.id ?? '',
+        checklist: card.checklist,
+        domain: plan.domain,
+      })
+      if (task !== undefined) cards.push(task)
+    }
+    host.sendJson(res, 200, {
+      ok: true,
+      plan,
+      summary,
+      requirement: { id: requirement?.id ?? '', code: requirement?.code ?? '', title: requirement?.title ?? plan.title },
+      cards: cards.map(task => ({ id: task.id, code: task.code, title: task.title, status: task.status, role: task.role })),
+    })
+    return true
+  }
+
+  if (route === '/ontology/skills/builtin' && method === 'POST') {
+    // 内置规范技能：每一步该守的规范，装进技能库后各角色 agent 可以直接加载。
+    const body = await host.readJsonBody(req)
+    const picked = String(body.name ?? '').trim()
+    const list = BUILTIN_SKILLS.filter(item => picked === '' || item.name === picked)
+    if (list.length === 0) {
+      host.sendJson(res, 404, { ok: false, error: `没有叫「${picked}」的内置技能` })
+      return true
+    }
+    let created = 0
+    for (const item of list) {
+      if (host.hasSkill(item.name) === true) continue
+      await host.saveSkill({
+        name: item.name,
+        description: item.description,
+        content: item.content,
+        whenToUse: item.whenToUse ?? '',
+        tags: item.tags ?? [],
+      })
+      created += 1
+    }
+    host.sendJson(res, 200, { ok: true, created, total: list.length, skills: list.map(item => ({ name: item.name, description: item.description })) })
+    return true
+  }
+
+  if (route === '/ontology/skills/builtin' && method === 'GET') {
+    host.sendJson(res, 200, {
+      ok: true,
+      skills: BUILTIN_SKILLS.map(item => ({
+        name: item.name,
+        description: item.description,
+        whenToUse: item.whenToUse ?? '',
+        tags: item.tags ?? [],
+        installed: host.hasSkill(item.name),
+      })),
     })
     return true
   }

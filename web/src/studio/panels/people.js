@@ -1,6 +1,6 @@
 /* Settings panels lifted out of client.src.js; shared handles come from the studio context. */
 
-import { ROLE_LABEL } from '../labels.js'
+import { ROLE_LABEL, TOOL_GROUP_LABEL, TOOL_NAMES } from '../labels.js'
 import { client } from '../context.js'
 
 export function ExpertsPanel({ config, onChanged }) {
@@ -17,7 +17,7 @@ export function ExpertsPanel({ config, onChanged }) {
   ]
 
   // 角色模板：新建专家时按角色套用 label / 模型 / 提示词；改这里不动已有专家
-  const ROLE_KEYS = ['product', 'architect', 'dev', 'qa']
+  const ROLE_KEYS = ['business', 'requirement', 'data', 'modeling', 'backend', 'frontend', 'qa']
   const [roles, setRoles] = React.useState(() => {
     const src = config.roles ?? {}
     const out = {}
@@ -31,10 +31,33 @@ export function ExpertsPanel({ config, onChanged }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
 
+  // 工作模式：一个人开发（solo，签字与评审只提示）↔ 团队协作（team，门槛重新拦截）。
+  const [workflowMode, setWorkflowMode] = React.useState(String(config.workflow?.mode ?? 'solo'))
+  const saveWorkflow = async mode => {
+    setBusy(true); setError(null)
+    try {
+      await api('/config', { workflow: { mode } })
+      setWorkflowMode(mode)
+      toast(mode === 'solo' ? '已切到单人开发模式' : '已切到团队协作模式')
+      await onChanged()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
+  }
+
   const save = async () => {
     if (draft === null) return
     setBusy(true); setError(null)
-    try { await api('/experts/save', { expert: draft }); setDraft(null); await onChanged() }
+    try {
+      // MCP 的 args 在表单里是空格分隔的一行，落库前拆成数组。
+      const expert = {
+        ...draft,
+        mcp: (draft.mcp ?? []).map(item => ({
+          ...item,
+          args: typeof item.args === 'string' ? item.args.split(/\s+/).filter(entry => entry !== '') : item.args,
+        })),
+      }
+      await api('/experts/save', { expert })
+      setDraft(null); await onChanged()
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
   }
   const remove = async expert => {
@@ -55,6 +78,23 @@ export function ExpertsPanel({ config, onChanged }) {
     const current = draft.skills ?? []
     set('skills', current.includes(name) ? current.filter(entry => entry !== name) : [...current, name])
   }
+  /* 每个角色能调的工具各不同：白名单留空表示不限制。 */
+  const toggleTool = name => {
+    const current = draft.tools ?? []
+    set('tools', current.includes(name) ? current.filter(entry => entry !== name) : [...current, name])
+  }
+  const setMcp = (index, patch) => {
+    const current = draft.mcp ?? []
+    set('mcp', current.map((item, at) => (at === index ? { ...item, ...patch } : item)))
+  }
+  const [pluginInput, setPluginInput] = React.useState('')
+  const addPlugin = () => {
+    const names = pluginInput.split(/[,，\s]+/).map(item => item.trim()).filter(item => item !== '')
+    if (names.length === 0 || draft === null) return
+    const current = draft.plugins ?? []
+    set('plugins', [...new Set([...current, ...names])])
+    setPluginInput('')
+  }
   const [skillInput, setSkillInput] = React.useState('')
   const addSkillName = () => {
     const value = skillInput.trim()
@@ -69,10 +109,13 @@ export function ExpertsPanel({ config, onChanged }) {
     setBusy(true); setError(null)
     try {
       const roles = [
-        { role: 'product', name: '产品经理', emoji: '📋', prompt: `你是${domain}业务的产品经理。\n先读 docs/ 与本领域的历史工单，再动手。\n需求写清：目标用户、主流程、异常路径、验收口径。` },
-        { role: 'architect', name: '架构师', emoji: '🏛️', prompt: `你是${domain}业务的架构师。\n方案必须给出：数据模型、接口契约、失败与回滚、性能与容量估算。\n不确定就去代码里找证据。` },
-        { role: 'dev', name: '开发工程师', emoji: '🛠️', prompt: `你是${domain}业务的开发工程师。\n改动要小步可验证，跑测试，写清改动的文件与风险。` },
-        { role: 'qa', name: '测试工程师', emoji: '🧪', prompt: `你是${domain}业务的测试工程师。\n按边界值、异常流、并发与幂等设计用例，列出实际执行结果。` },
+        { role: 'business', name: '业务专家', emoji: '📋', prompt: `你是${domain}业务的业务专家。\n先读 docs/ 与本领域的历史工单，再动手。\n需求写清：目标用户、主流程、异常路径、验收口径。` },
+        { role: 'requirement', name: '需求人员', emoji: '🧭', prompt: `你是${domain}业务的需求人员。\n需求正文六段齐全：背景 / 目标 / 范围 / 不做 / 验收 / 风险。\n把需求拆成能独立验收的功能点。` },
+        { role: 'data', name: '数据研发', emoji: '🗄️', prompt: `你是${domain}业务的数据研发。\n每张数据资产写清：来源系统、表/字段、口径、更新频率、质量校验。\n口径对不上先查数，不许猜。` },
+        { role: 'modeling', name: '本体工程师', emoji: '🏛️', prompt: `你是${domain}业务的本体工程师。\n对象、关系、规则、行动四层都要能判定。\n不确定就去代码与文档里找证据，禁止编造接口字段。` },
+        { role: 'backend', name: '后端工程师', emoji: '🛠️', prompt: `你是${domain}业务的后端工程师。\n接口契约先定再写码，报错要可读，失败要有回滚路径。\n改动小步可验证，跑测试，写清改动的文件与风险。` },
+        { role: 'frontend', name: '前端工程师', emoji: '🖥️', prompt: `你是${domain}业务的前端工程师。\n页面结构、状态与口径必须和本体一致，不许前端自己造口径。\n交互要能看出「数据从哪来、为什么是这个结论」。` },
+        { role: 'qa', name: '测试工程师', emoji: '🧪', prompt: `你是${domain}业务的测试工程师。\n按边界值、异常流、并发与幂等设计用例，列出实际执行结果。\n失败的用例必须留下可复现的证据。` },
       ]
       for (const role of roles) {
         await api('/experts/save', {
@@ -114,6 +157,10 @@ export function ExpertsPanel({ config, onChanged }) {
             onClick: () => setDraft({ ...expert }),
           }, `提示词：${promptPreview(expert.prompt)}`),
       (expert.skills ?? []).length > 0 ? h('div', { className: 'ds-hint' }, `技能：${expert.skills.join('、')}`) : null,
+      (expert.tools ?? []).length > 0 ? h('div', { className: 'ds-hint' }, `工具白名单：${expert.tools.length} 项`) : null,
+      (expert.plugins ?? []).length > 0 || (expert.mcp ?? []).length > 0
+        ? h('div', { className: 'ds-hint' }, `插件 ${(expert.plugins ?? []).length} 个 · MCP ${(expert.mcp ?? []).length} 个`)
+        : null,
     ),
     h('div', { className: 'ds-listrow-actions' },
       tipOf('编辑这位专家', h('button', { className: 'ds-btn', disabled: busy, onClick: () => setDraft({ ...expert }) }, '编辑')),
@@ -122,6 +169,27 @@ export function ExpertsPanel({ config, onChanged }) {
   ))
 
   return h('div', { className: 'ds-pane-stack' },
+    h('div', { className: 'ds-panel', style: { marginBottom: 12 } },
+      h('div', { className: 'ds-panel-head' }, '工作模式',
+        h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, '一个人开发就选「单人开发」，签字与评审只提示不拦')),
+      h('div', { className: 'ds-panel-body' },
+        h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'center' } },
+          h('button', {
+            className: workflowMode === 'solo' ? 'ds-btn ds-btn-primary' : 'ds-btn',
+            disabled: busy || workflowMode === 'solo',
+            onClick: () => void saveWorkflow('solo'),
+          }, '单人开发（免审批）'),
+          h('button', {
+            className: workflowMode === 'team' ? 'ds-btn ds-btn-primary' : 'ds-btn',
+            disabled: busy || workflowMode === 'team',
+            onClick: () => void saveWorkflow('team'),
+          }, '团队协作（要签字与评审）'),
+          h('span', { className: 'ds-hint' }, workflowMode === 'solo'
+            ? '当前：需求评审签字、验收签字只提示，不拦你推进。'
+            : '当前：需求评审签字、验收签字会拦，卡准出要过。'),
+        ),
+      ),
+    ),
     h('div', { className: 'ds-panel', style: { marginBottom: 12 } },
       h('div', { className: 'ds-panel-head' }, '角色模板',
         h('span', { className: 'ds-hint', style: { marginLeft: 'auto' } }, '新建专家时套用；改这里不影响已有专家')),
@@ -142,17 +210,17 @@ export function ExpertsPanel({ config, onChanged }) {
     h(Editor, {
       title: '专家（可在评论里 @ 他们）',
       hint: '每个专家有名字、业务领域、角色提示词和技能；评论里 @名字 就会把这条工作派给他。',
-      rows, onAdd: () => setDraft({ id: '', name: '', emoji: '🧩', role: '', domain: '', description: '', prompt: '', skills: [], model: '', preset: '', sandbox: '', enabled: true }), addLabel: '新增专家',
+      rows, onAdd: () => setDraft({ id: '', name: '', emoji: '🧩', role: '', domain: '', description: '', prompt: '', skills: [], tools: [], plugins: [], mcp: [], model: '', preset: '', sandbox: '', enabled: true }), addLabel: '新增专家',
       render: row => row,
       empty: '还没有专家，点「新增专家」建一个。',
     }),
     h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'center', padding: '6px 0 10px' } },
-      h('span', { className: 'ds-hint' }, '按业务领域一次生成四位：'),
+      h('span', { className: 'ds-hint' }, '按业务领域一次生成七位角色专家：'),
       h(TextField, {
         className: 'ds-input', style: { maxWidth: 180 }, value: batchDomain, placeholder: '支付 / 风控 / 会员',
         onChange: e => setBatchDomain(e.target.value),
       }),
-      h('button', { className: 'ds-btn', disabled: busy || batchDomain.trim().length === 0, onClick: () => void createDomainSet() }, '生成产品/架构/研发/测试'),
+      h('button', { className: 'ds-btn', disabled: busy || batchDomain.trim().length === 0, onClick: () => void createDomainSet() }, '生成七位角色专家'),
       error !== null ? h('span', { className: 'ds-error' }, error) : null,
     ),
     draft === null ? null : h(SideDrawer, {
@@ -204,7 +272,7 @@ export function ExpertsPanel({ config, onChanged }) {
               onChange: e => set('role', e.target.value),
             },
               h('option', { value: '' }, '不限'),
-              ['product', 'architect', 'dev', 'qa'].map(v => h('option', { key: v, value: v }, ROLE_LABEL[v] ?? v))),
+              ROLE_KEYS.map(v => h('option', { key: v, value: v }, ROLE_LABEL[v] ?? v))),
             h('div', { className: 'ds-hint' }, '决定默认接哪一列'),
           ),
           h('div', { className: 'ds-field', style: { flex: 1 } },
@@ -248,6 +316,81 @@ export function ExpertsPanel({ config, onChanged }) {
             )
             : null,
         ),
+        h('div', { className: 'ds-field' },
+          tipLabel('可调用工具白名单', '每个角色能调的工具各不同：勾上的才给这个专家用；留空表示不限制'),
+          h('div', { className: 'ds-row', style: { gap: 8, alignItems: 'center', marginBottom: 8 } },
+            h('button', { className: 'ds-btn', onClick: () => set('tools', TOOL_NAMES.slice()) }, '全选'),
+            h('button', { className: 'ds-btn', onClick: () => set('tools', []) }, '清空'),
+            h('span', { className: 'ds-hint' }, `已选 ${(draft.tools ?? []).length} / ${TOOL_NAMES.length}`),
+          ),
+          TOOL_GROUP_LABEL.map(group => {
+            const names = TOOL_NAMES.filter(name => group.match(name))
+            if (names.length === 0) return null
+            return h('div', { key: group.id, style: { marginBottom: 8 } },
+              h('div', { className: 'ds-hint' }, group.label),
+              h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+                names.map(name => {
+                  const on = (draft.tools ?? []).includes(name)
+                  return h('label', { key: name, className: 'ds-chip', 'data-on': on ? '1' : '0', style: { cursor: 'pointer' } },
+                    h(CheckField, { checked: on, onChange: () => toggleTool(name) }),
+                    h('span', {}, name.replace('ontology_', '')),
+                  )
+                }),
+              ),
+            )
+          }),
+        ),
+        h('div', { className: 'ds-field' },
+          tipLabel('接入的插件', '插件包名（scope 形式写成「@你的账号/插件名」）；派活时会挂到这个专家的会话里'),
+          h(TextField, {
+            className: 'ds-input', value: pluginInput,
+            placeholder: '回车添加，多个用逗号也行',
+            onChange: e => setPluginInput(e.target.value),
+            onKeyDown: e => { if (e.key === 'Enter') { e.preventDefault(); addPlugin() } },
+          }),
+          (draft.plugins ?? []).length > 0
+            ? h('div', { className: 'ds-row', style: { flexWrap: 'wrap', gap: 6, marginTop: 6, alignItems: 'center' } },
+              (draft.plugins ?? []).map(name => h(ChipField, { key: name, className: 'ds-chip' },
+                name,
+                h('button', { className: 'ds-chip-x', title: '移除', onClick: () => set('plugins', (draft.plugins ?? []).filter(entry => entry !== name)) }, '×'),
+              )),
+            )
+            : null,
+        ),
+        h('div', { className: 'ds-field' },
+          tipLabel('接入的 MCP', '这个专家干活时能用的外部系统：stdio 起本地命令，或 streamable-http 连远端'),
+          (draft.mcp ?? []).map((item, index) => h('div', {
+            key: `${item.serverName ?? 'mcp'}-${index}`,
+            style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 },
+          },
+            h(TextField, {
+              className: 'ds-input', placeholder: '服务名（如 crm，只允许字母数字_-）',
+              value: item.serverName ?? '', onChange: e => setMcp(index, { ...item, serverName: e.target.value }),
+            }),
+            h(SelectField, {
+              className: 'ds-input', value: item.transport ?? 'stdio',
+              onChange: e => setMcp(index, { ...item, transport: e.target.value }),
+            },
+              h('option', { value: 'stdio' }, 'stdio（本地命令）'),
+              h('option', { value: 'streamable-http' }, 'streamable-http（远端 URL）'),
+            ),
+            item.transport === 'streamable-http'
+              ? h(TextField, {
+                className: 'ds-input', placeholder: 'https://host/mcp',
+                value: item.url ?? '', onChange: e => setMcp(index, { ...item, url: e.target.value }),
+              })
+              : h(TextField, {
+                className: 'ds-input', placeholder: '命令，如 npx',
+                value: item.command ?? '', onChange: e => setMcp(index, { ...item, command: e.target.value }),
+              }),
+            h(TextField, {
+              className: 'ds-input', placeholder: '参数，空格分隔',
+              value: typeof item.args === 'string' ? item.args : (item.args ?? []).join(' '),
+              onChange: e => setMcp(index, { ...item, args: e.target.value }),
+            }),
+          )),
+          h('button', { className: 'ds-btn', onClick: () => set('mcp', [...(draft.mcp ?? []), { serverName: '', transport: 'stdio', command: '', args: '' }]) }, '加一个 MCP'),
+        ),
         h('div', { className: 'ds-row', style: { gap: 8 } },
           h('div', { className: 'ds-field', style: { flex: 1 } },
             h('div', { className: 'ds-label' }, '模型'),
@@ -274,8 +417,7 @@ export function ExpertsPanel({ config, onChanged }) {
           ),
         ),
         h('div', { className: 'ds-field' },
-          h('div', { className: 'ds-label' }, '角色提示词（每次派活都会作为系统提示发给这个专家）'),
-          h(TextAreaField, {
+          h('div', { className: 'ds-label' }, '角色提示词（每次派活都会作为系统提示发给这个专家）'),          h(TextAreaField, {
             className: 'ds-input', rows: 9, value: draft.prompt,
             placeholder: '例如：\n你是支付域的产品经理。先读 docs/ 与支付相关的 ADR，再动手。\n需求必须写清：目标用户、主流程、异常与退款路径、对账口径。\n不确定的地方去代码或历史工单里找证据，禁止编造接口字段。',
             onChange: e => set('prompt', e.target.value),

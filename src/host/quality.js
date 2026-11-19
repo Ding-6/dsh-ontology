@@ -5,9 +5,7 @@
 //   卡数 / 完成数     —— task.expert（换列时会被列负责人覆盖，所以只有「当前负责」的卡能算）
 //   返工              —— 列往回退过、AI 失败过、缺陷重开过，任一命中就算这张卡返工了
 
-import { STATUS_IDS } from './domain.js'
-
-const order = new Map(STATUS_IDS.map((id, index) => [id, index]))
+import { statusRank } from './timeline.js'
 
 /** 这张卡有没有返工，以及为什么。 */
 export function taskRework(task) {
@@ -15,9 +13,9 @@ export function taskRework(task) {
   const history = Array.isArray(task?.history) ? task.history : []
   let backwards = 0
   for (let index = 1; index < history.length; index += 1) {
-    const from = order.get(String(history[index - 1]?.status ?? ''))
-    const to = order.get(String(history[index]?.status ?? ''))
-    if (from === undefined || to === undefined) continue
+    const from = statusRank(history[index - 1]?.status ?? '')
+    const to = statusRank(history[index]?.status ?? '')
+    if (from < 0 || to < 0) continue
     if (to < from) backwards += 1
   }
   // 返工只认「列往回退」——和效能页那个「一次通过率」KPI 用同一条定义（index.js 的 taskTimeline.backward），

@@ -1384,3 +1384,104 @@ test('host: the semantic layer is reachable and its write paths are wired', () =
   assert.ok(read('src/host/access.js').includes("'/ontology/service'"), 'service packaging must stay a read-only operation')
 })
 
+test('ontology: the planner turns one business sentence into a staged plan with a first-cut version', async () => {
+  const { buildPlan, planToCards, planSummary, matchTemplate } = await import('../src/host/planner.js')
+  const plan = buildPlan({ business: '我要给省分做一套渠道投放效果的本体，能看渠道ROI也能预警异常投放' })
+  assert.ok(plan.stages.length >= 5, 'a plan must walk the standard stages')
+  assert.ok(plan.steps.length >= 8, 'a plan must break into concrete steps')
+  assert.ok(plan.steps.every(step => (step.skills ?? []).length > 0), 'every step must name the skills it obeys')
+  assert.ok(plan.steps.every(step => (step.acceptance ?? []).length > 0), 'every step must carry acceptance criteria')
+  assert.ok(plan.steps.every(step => (step.deliverable ?? '').length > 0), 'every step must say what it delivers')
+  // 初定版本：骨架实例化出来的四类资产草案。
+  assert.ok(plan.draft.objects.length > 0, 'the first-cut version must carry object drafts')
+  assert.ok(plan.draft.objects.every(item => item.status === 'draft'), 'drafts must be marked as drafts')
+  assert.ok(plan.scope.objects === plan.draft.objects.length, 'the scope counters must match the drafts')
+  // 骨架挑选：业务描述里出现行业词就挑对应骨架，否则通用。
+  assert.equal(matchTemplate('设备工单与能耗分析'), 'industrial')
+  assert.equal(matchTemplate('随便说点什么'), 'general')
+  // 卡片骨架：每一步一张卡，落在对应角色位的列上。
+  const cards = planToCards(plan)
+  assert.equal(cards.length, plan.steps.length)
+  assert.ok(cards.every(card => card.role && card.column && card.type), 'a card needs a role, a column and a type')
+  assert.ok(cards.every(card => card.checklist.length > 0), 'a card must carry its acceptance checklist')
+  assert.ok(cards.every(card => card.requirement.includes('验收标准')), 'a card body must state the acceptance criteria')
+  assert.ok(planSummary(plan).includes('本体开发计划'), 'the plan needs a readable summary')
+})
+
+test('ontology: the built-in skills cover every stage the planner assigns', async () => {
+  const { BUILTIN_SKILLS, builtinSkill } = await import('../src/host/ontology-skills.js')
+  const { buildPlan } = await import('../src/host/planner.js')
+  assert.ok(BUILTIN_SKILLS.length >= 10, 'the built-in skill library must cover the standard actions')
+  const names = new Set(BUILTIN_SKILLS.map(item => item.name))
+  assert.equal(names.size, BUILTIN_SKILLS.length, 'every built-in skill needs its own name')
+  assert.ok(BUILTIN_SKILLS.every(item => (item.content ?? '').length > 40), 'a skill without a body is useless')
+  const plan = buildPlan({ business: '做一个订单履约追踪的本体' })
+  const missing = plan.steps.flatMap(step => step.skills ?? []).filter(name => !names.has(name))
+  assert.deepEqual(missing, [], 'every skill the planner assigns must exist in the built-in library')
+  assert.ok(builtinSkill('ontology-object-modeling') !== null, 'a known skill must be found by name')
+  assert.equal(builtinSkill('nope-not-here'), null, 'an unknown skill must not be invented')
+})
+
+test('host: the solo workflow ships seven role slots and the standard-action columns', async () => {
+  const { STATUSES, ROLE_IDS, defaultConfig, defaultColumns } = await import('../src/host/domain.js')
+  const { DEFAULT_ROLES } = await import('../src/host/roles.js')
+  assert.deepEqual(ROLE_IDS, ['business', 'requirement', 'data', 'modeling', 'backend', 'frontend', 'qa'], 'the seven role slots must be the standard actions')
+  assert.deepEqual(STATUSES.map(item => item.id), ['clarify', 'design', 'data', 'model', 'backend', 'frontend', 'test', 'done'], 'the board must follow the standard-action columns')
+  const config = defaultConfig()
+  assert.equal(config.workflow.mode, 'solo', 'a single developer must not have to ask for approval')
+  assert.ok(Object.keys(config.roles).length === 7, 'every role slot needs its own model and prompt slot')
+  assert.ok(ROLE_IDS.every(role => DEFAULT_ROLES[role] !== undefined), 'every role slot needs an out-of-the-box role definition')
+  assert.ok(ROLE_IDS.every(role => {
+    const prompt = DEFAULT_ROLES[role].prompt
+    const text = Array.isArray(prompt) ? prompt.join('\n') : String(prompt ?? '')
+    return text.length > 40
+  }), 'every role must ship a written standard')
+  assert.ok(ROLE_IDS.every(role => (DEFAULT_ROLES[role].skills ?? []).length > 0), 'every role must name the skills it obeys')
+  assert.ok(ROLE_IDS.every(role => (DEFAULT_ROLES[role].tools ?? []).length > 0), 'every role must ship its own tool whitelist')
+  const columns = defaultColumns()
+  assert.equal(columns.clarify.kind, 'none', 'the first column waits for the developer to start it')
+  assert.equal(columns.model.id, 'modeling', 'the modelling column belongs to the modelling role')
+  assert.equal(columns.backend.id, 'backend', 'the backend column belongs to the backend role')
+})
+
+test('host: an expert may carry a tool whitelist, plugins and MCP servers', async () => {
+  const { sanitizeExpertTools, sanitizeExpertPlugins, sanitizeExpertMcp } = await import('../src/host/expert-capability.js')
+  assert.deepEqual(sanitizeExpertTools(['ontology_plan', 'ontology_asset_save', '']), ['ontology_plan', 'ontology_asset_save'], 'blank entries must not become tools')
+  assert.equal(sanitizeExpertTools(['x'.repeat(80)]).length, 1, 'a long tool name is kept but capped')
+  assert.deepEqual(sanitizeExpertPlugins(['dsh-mcp-client', '']), ['dsh-mcp-client'])
+  const mcp = sanitizeExpertMcp([
+    { serverName: 'docs', transport: 'stdio', command: 'npx', args: ['-y', 'docs-mcp'] },
+    { serverName: 'api', transport: 'streamable-http', url: 'https://example.com/mcp' },
+    { serverName: 'bad name', transport: 'stdio', command: 'x' },
+    { serverName: 'nocmd', transport: 'stdio' },
+    { serverName: 'nourl', transport: 'streamable-http' },
+  ])
+  assert.equal(mcp.length, 2, 'a broken server name or a missing transport target must be dropped')
+  assert.ok(mcp.some(item => item.serverName === 'docs' && item.transport === 'stdio'))
+  assert.ok(mcp.some(item => item.serverName === 'api' && item.url === 'https://example.com/mcp'))
+  assert.ok(mcp.every(item => /^[A-Za-z0-9_-]{1,32}$/.test(item.serverName)), 'a server name must be a safe identifier')
+})
+
+test('host: the legacy columns fold into the new timeline', async () => {
+  const { statusRank, taskTimeline, LEGACY_STATUS_ALIAS } = await import('../src/host/timeline.js')
+  assert.equal(LEGACY_STATUS_ALIAS.dev, 'model', 'the old modelling column is now the modelling column')
+  assert.ok(statusRank('clarify') < statusRank('model'), 'the column order must follow the standard actions')
+  assert.ok(statusRank('dev') === statusRank('model'), 'an old column id must still be understood')
+  const timeline = taskTimeline({ status: 'model', history: [{ status: 'design' }, { status: 'dev' }, { status: 'design' }] })
+  assert.equal(timeline.columns, 3, 'the timeline must count the columns the card walked through')
+  assert.ok(timeline.backward >= 1, 'going back to an earlier column is a rework')
+  assert.ok(timeline.dwell !== undefined, 'the timeline must report how long each column took')
+})
+
+test('host: the planner, the built-in skills and the agent conversation are wired', () => {
+  const routes = read('src/host/routes/ontology.js')
+  assert.ok(routes.includes('/ontology/plan'), 'the planner route must exist')
+  assert.ok(routes.includes('/ontology/skills/builtin'), 'the built-in skills route must exist')
+  const tools = read('src/host/tools.js')
+  assert.ok(tools.includes('ontology_plan'), 'the copilot must be able to make a plan')
+  assert.ok(tools.includes('ontology_agent_ask'), 'the copilot must be able to ask another role')
+  assert.ok(tools.includes('ontology_skill_builtin'), 'the copilot must be able to install the built-in skills')
+  assert.ok(tools.includes('expertToolDenial'), 'the tool whitelist must be enforced at the tool boundary')
+  assert.ok(read('src/host/dispatcher.js').includes('applyExpertScope'), 'each role session must mount its own skills, tools, plugins and MCP')
+})
+

@@ -105,6 +105,7 @@ const imports = [
   "import { ReleasesPage } from './studio/pages/releases.js'",
   "import { AnalyticsPage } from './studio/pages/analytics.js'",
   "import { OntologyPage } from './studio/pages/ontology.js'",
+  "import { PlanPage } from './studio/pages/plan.js'",
 ].join('\n') + '\n\n'
 writeFileSync(target, banner + imports + text)
 console.log(`make-legacy: wrote ${target} (${text.length} chars)`)

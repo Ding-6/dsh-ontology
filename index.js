@@ -51,6 +51,7 @@ import { configureSkillsRoutes, handleSkillsRoute } from './src/host/routes/skil
 import { configureOntologyRoutes, handleOntologyRoute } from './src/host/routes/ontology.js'
 import { ontologyStats } from './src/host/ontology.js'
 import { dataPath, dshHomePath, isSkillName, skillsRoot } from './src/host/paths.js'
+import { taskTimeline } from './src/host/timeline.js'
 import { DEFAULT_ROLES } from './src/host/roles.js'
 import { INTEGRATION, markHealth, escalateHealth, healthReport, restoreHealth, projectReady, gitlabReady, gitlabMergeRequestDetail, gitlabRequest, gitlabSync, feishuPush, feishuBroadcast, broadcastChange, configureIntegrations } from './src/host/integrations.js'
 import { SecretStore, StudioStore } from './src/host/store.js'
@@ -416,6 +417,7 @@ async function readJsonBody(req) {
 function publicConfig(config) {
   return {
     board: config.board,
+    workflow: { mode: String(config.workflow?.mode ?? 'solo') },
     experts: config.experts,
     teams: config.teams,
     columns: config.columns,
@@ -615,52 +617,7 @@ function percentile(values, ratio) {
 
 const DAY = 86_400_000
 
-/** 把一张卡的历史折成「走过哪些列、倒退过几次、每列待了多久」。 */
-function taskTimeline(task) {
-  const history = Array.isArray(task.history) ? task.history : []
-  const steps = []
-  for (const entry of history) {
-    const status = String(entry?.status ?? '')
-    if (status === '' || !STATUS_IDS.includes(status)) continue
-    if (steps.length > 0 && steps[steps.length - 1].status === status) {
-      // 同一列重复记录（比如阻塞/解除）合并，但保留最后一次时间
-      steps[steps.length - 1].at = Number(entry.at) || steps[steps.length - 1].at
-      continue
-    }
-    steps.push({ status, at: Number(entry.at) || 0, by: String(entry?.by ?? ''), note: String(entry?.note ?? '') })
-  }
-  if (steps.length === 0) {
-    steps.push({ status: task.status, at: Number(task.createdAt) || 0, by: '', note: '' })
-  }
-  const rank = status => STATUS_IDS.indexOf(status)
-  let backward = 0
-  let reviewBack = 0
-  let testBack = 0
-  const dwell = {}
-  for (let index = 0; index < steps.length; index += 1) {
-    const step = steps[index]
-    const next = steps[index + 1]
-    const until = next === undefined ? Date.now() : next.at
-    const span = Math.max(0, until - step.at)
-    dwell[step.status] = (dwell[step.status] ?? 0) + span
-    if (next === undefined) continue
-    if (rank(next.status) < rank(step.status)) {
-      backward += 1
-      if (step.status === 'review') reviewBack += 1
-      if (step.status === 'test' || step.status === 'accept') testBack += 1
-    }
-  }
-  const doneStep = steps.find(step => step.status === 'done')
-  return {
-    steps,
-    backward,
-    reviewBack,
-    testBack,
-    dwell,
-    doneAt: doneStep === undefined ? 0 : doneStep.at,
-    columns: steps.length,
-  }
-}
+/** 把一张卡的历史折成「走过哪些列、倒退过几次、每列待了多久」→ 见 src/host/timeline.js。 */
 
 function buildAnalytics(state, options = {}) {
   const now = Date.now()
@@ -1122,6 +1079,11 @@ async function applyConfig(store, patch) {
     if (patch.templates !== undefined) {
       config.templates = sanitizeTemplates(patch.templates)
     }
+    // 工作模式：solo = 一个人开发，签字与评审门槛只提示不拦；team = 团队协作，门槛重新生效。
+    if (patch.workflow !== undefined && typeof patch.workflow === 'object') {
+      const mode = String(patch.workflow.mode ?? '')
+      if (mode === 'solo' || mode === 'team') config.workflow = { mode }
+    }
     if (patch.access !== undefined && typeof patch.access === 'object') {
       const a = patch.access
       if (Array.isArray(a.members)) config.access.members = sanitizeAccess({ ...config.access, members: a.members }).members
@@ -1274,9 +1236,9 @@ async function createTask(store, input) {
   if (title === undefined) throw new Error('title is required')
   const patch = normalizePatch(input)
   const now = Date.now()
-  // 缺陷默认直接进「待开发」，需求默认从「待澄清」开始。
-  const initialStatus = patch.status ?? (patch.type === 'bug' ? 'dev_ready' : 'clarify')
-  const initialRole = patch.role ?? (STATUSES.find(item => item.id === initialStatus)?.role ?? 'product')
+  // 缺陷默认直接进「后端与服务」（代码修复在那儿），需求默认从「场景筛选」开始。
+  const initialStatus = patch.status ?? (patch.type === 'bug' ? 'backend' : 'clarify')
+  const initialRole = patch.role ?? (STATUSES.find(item => item.id === initialStatus)?.role ?? 'business')
   const type = patch.type ?? 'requirement'
   // 建卡时按模板铺一张验收清单：这一行活到底要交什么，一开始就写清楚。
   const template = store.snapshot().config.templates[type] ?? []
@@ -2536,6 +2498,8 @@ const PROTOCOL = `# Studio 工作看板协议
 let syncTimer
 let activeDispatcher
 let activeStore = null
+/** 宿主 agents 服务：agent↔agent 对话要用它拿活会话句柄。 */
+let activeAgents = null
 
 // ------------------------------------------------------------------- mount
 
@@ -2590,6 +2554,7 @@ export function apply(ctx) {
     addDraftCases, applyConfig, auditSummary, buildAnalytics, buildMetrics, burndownReport, checkToolAccess, createTask,
     releaseGate, releaseNotes, skillsRoot, taskLine, toolLevel, toolOperator, upsertById, workloadReport,
     getActiveDispatcher: () => activeDispatcher, getActiveSkills: () => activeSkills,
+    getActiveAgents: () => activeAgents,
   })
   const disposeTools = registerTools(ctx, store)
   ctx.effect(() => () => { for (const dispose of disposeTools.splice(0)) dispose() }, 'dsh-ontology: tools')
@@ -2676,10 +2641,19 @@ export function apply(ctx) {
       publicState,
       upsertById,
     })
-    configureOntologyRoutes({ sendJson, readJsonBody, publicState })
+    configureOntologyRoutes({
+      sendJson,
+      readJsonBody,
+      publicState,
+      createTask,
+      saveRequirement,
+      saveSkill: async input => skills.save(input),
+      hasSkill: name => skills.get(name) !== undefined,
+    })
     configureAuthRoutes({ sendJson, readJsonBody, recordAudit, recordLogin, issueSession, sessionOf, operatorOf, ldapAuthenticate, ldapLookup, ldapAttr, sessions: SESSIONS, dropSession: token => SESSION_STORE?.dropSession?.(token), hasSessionStore: () => SESSION_STORE !== null, publicState })
     dispatcher = new Dispatcher(dispatcherCtx, store)
     activeDispatcher = dispatcher
+    activeAgents = dispatcherCtx.agents
     dispatcher.start()
     const offStatus = dispatcherCtx.on('agent/status', ({ agent, status }) => {
       if (status === 'idle') dispatcher?.settle(agent.id)
@@ -2688,6 +2662,7 @@ export function apply(ctx) {
       dispatcher?.stop()
       dispatcher = undefined
       activeDispatcher = undefined
+      activeAgents = null
       offStatus?.()
     }
   })

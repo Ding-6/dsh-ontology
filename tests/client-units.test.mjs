@@ -69,7 +69,7 @@ test('roster: owner labels cover role, team, expert and pool shapes', () => {
   assert.equal(ownerLabel(config, { kind: 'pool', members: [] }), '')
 })
 
-test('roster: buildRoster puts the four role slots first and skips disabled experts', () => {
+test('roster: buildRoster puts the seven role slots first and skips disabled experts', () => {
   const config = {
     experts: [
       { id: 'expert-a', name: '支付产品经理', role: 'product', enabled: true },
@@ -77,7 +77,10 @@ test('roster: buildRoster puts the four role slots first and skips disabled expe
     ],
   }
   const roster = buildRoster(config)
-  assert.deepEqual(roster.slice(0, 4).map((item) => item.key), ['r:product', 'r:architect', 'r:dev', 'r:qa'])
+  assert.deepEqual(
+    roster.slice(0, 7).map((item) => item.key),
+    ['r:business', 'r:requirement', 'r:data', 'r:modeling', 'r:backend', 'r:frontend', 'r:qa'],
+  )
   assert.ok(roster.some((item) => item.key === 'e:expert-a'), 'enabled expert is listed')
   assert.ok(!roster.some((item) => item.key === 'e:expert-off'), 'disabled expert is skipped')
   assert.equal(roster[0].group, '角色位')

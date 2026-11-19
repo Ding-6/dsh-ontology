@@ -318,7 +318,7 @@ export async function gitlabSyncMergeRequests(store, config, project) {
     .filter(task => String(task.gitlabProject ?? '') === project.id)
     .filter(task => Number.isFinite(Number(task.gitlabIid)) && Number(task.gitlabIid) > 0)
     .filter(task => !seen.has(task.id))
-    .filter(task => task.status === 'dev' || task.status === 'review' || (task.gitlabMR?.iid ?? 0) === 0)
+    .filter(task => task.status === 'model' || task.status === 'backend' || (task.gitlabMR?.iid ?? 0) === 0)
     .slice(0, 12)
   for (const task of candidates) {
     const list = await gitlabRequest(config, project, `/issues/${Number(task.gitlabIid)}/related_merge_requests`).catch(() => [])
@@ -368,31 +368,31 @@ export async function gitlabSyncMergeRequests(store, config, project) {
           })),
         })
       }
-      if (next.state === 'opened' && target.status === 'dev') {
+      if (next.state === 'opened' && target.status === 'model') {
         const from = target.status
-        target.status = 'review'
-        target.role = 'architect'
+        target.status = 'backend'
+        target.role = 'backend'
         target.expert = ''
-        target.history = [...(target.history ?? []), { at: Date.now(), by: 'gitlab', status: 'review', note: `MR !${iid} 已提交，转待评审` }]
+        target.history = [...(target.history ?? []), { at: Date.now(), by: 'gitlab', status: 'backend', note: `MR !${iid} 已提交，转后端与服务` }]
         target.comments = [...(target.comments ?? []), {
           id: `${Date.now()}-${randomBytes(3).toString('hex')}`,
           at: Date.now(),
           author: 'GitLab',
           kind: 'agent',
-          body: `MR !${iid} 关联到这张卡：${next.title}\n${next.url}\n\n开发阶段结束，已自动推进到「待评审」（原列：${from}）。${next.pipeline === undefined ? '' : `\n流水线：${next.pipeline.status}`}`,
+          body: `MR !${iid} 关联到这张卡：${next.title}\n${next.url}\n\n建模阶段结束，已自动推进到「后端与服务」（原列：${from}）。${next.pipeline === undefined ? '' : `\n流水线：${next.pipeline.status}`}`,
         }]
-      } else if (next.state === 'merged' && (target.status === 'dev' || target.status === 'review')) {
+      } else if (next.state === 'merged' && (target.status === 'model' || target.status === 'backend')) {
         const from = target.status
         target.status = 'test'
         target.role = 'qa'
         target.expert = ''
-        target.history = [...(target.history ?? []), { at: Date.now(), by: 'gitlab', status: 'test', note: `MR !${iid} 已合并，转待测试` }]
+        target.history = [...(target.history ?? []), { at: Date.now(), by: 'gitlab', status: 'test', note: `MR !${iid} 已合并，转联调测试` }]
         target.comments = [...(target.comments ?? []), {
           id: `${Date.now()}-${randomBytes(3).toString('hex')}`,
           at: Date.now(),
           author: 'GitLab',
           kind: 'agent',
-          body: `MR !${iid} 已合并（原列：${from}），自动推进到「待测试」：现在应该在测试环境跑用例，通过后再收口。`,
+          body: `MR !${iid} 已合并（原列：${from}），自动推进到「联调测试」：现在应该跑用例，通过后再收口。`,
         }]
       }
       if (next.pipeline?.status === 'failed') {
@@ -436,7 +436,7 @@ export async function gitlabSync(store, projectId) {
           // 带 bug 标签的 Issue 直接建成缺陷卡，P0~P3 标签顺便当严重级别。
           const isBug = labels.some(label => /^(bug|defect|缺陷|故障)$/i.test(label.trim()))
           const severityLabel = labels.map(label => label.trim().toLowerCase()).find(label => /^p[0-3]$/.test(label))
-          const entryStatus = isBug ? 'dev_ready' : 'clarify'
+          const entryStatus = isBug ? 'backend' : 'clarify'
           // 从 GitLab 拉进来的卡也照模板铺验收清单，不然它一进流程就是个没有「做完」定义的空卡。
           const template = state.config.templates[isBug ? 'bug' : 'requirement'] ?? []
           state.tasks.unshift({
@@ -444,9 +444,9 @@ export async function gitlabSync(store, projectId) {
             title: `#${issue.iid} ${issue.title}`.slice(0, 200),
             type: isBug ? 'bug' : 'requirement',
             status: entryStatus,
-            role: isBug ? 'dev' : 'product',
+            role: isBug ? 'backend' : 'business',
             severity: isBug ? (severityLabel ?? 'p2') : '',
-            expert: isBug ? 'dev' : 'product',
+            expert: isBug ? 'backend' : 'business',
             priority: isBug && severityLabel === 'p0' ? 'urgent' : 'normal',
             requirement: String(issue.description ?? '').slice(0, 20000),
             gitlabIssue: String(issue.web_url ?? ''),

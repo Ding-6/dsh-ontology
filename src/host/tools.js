@@ -18,6 +18,8 @@ import {
 import { BLUEPRINT_SECTIONS, ontologyBlueprint } from './ontology-blueprint.js'
 import { applyGuideBook, GUIDE_BOOK, searchGuideBook } from './ontology-guide-book.js'
 import { ONTOLOGY_TEMPLATES, applyOntologyTemplate } from './ontology-templates.js'
+import { buildPlan, planSummary, planToCards } from './planner.js'
+import { BUILTIN_SKILLS, builtinSkill } from './ontology-skills.js'
 const INJECTED = ["activeDispatcher","activeSkills","addDraftCases","applyConfig","auditSummary","buildAnalytics","buildMetrics","burndownReport","checkToolAccess","createTask","releaseGate","releaseNotes","skillsRoot","taskLine","toolLevel","toolOperator","upsertById","workloadReport"]
 let host = {
   activeDispatcher: () => {},
@@ -40,10 +42,90 @@ let host = {
   workloadReport: () => {},
   getActiveDispatcher: () => undefined,
   getActiveSkills: () => undefined,
+  getActiveAgents: () => undefined,
 }
 /** Agent-facing tools. 宿主能力由 configureToolHost() 注入（避免反向 import index.js 成环）。 */
 export function configureToolHost(services) {
   host = { ...host, ...(services ?? {}) }
+}
+
+/**
+ * agent 互相对话时读对方会话里的文字：先记下当前序号，问完再只取新增的助手消息。
+ */
+async function sessionEvents(agent) {
+  const snapshot = agent?.session?.snapshotEvents
+  if (typeof snapshot !== 'function') return []
+  try {
+    const events = await snapshot.call(agent.session)
+    return Array.isArray(events) ? events : []
+  } catch {
+    return []
+  }
+}
+
+async function sessionSeq(agent) {
+  const events = await sessionEvents(agent)
+  return events.reduce((max, item) => Math.max(max, Number(item?.seq ?? 0)), 0)
+}
+
+/** 取一条事件里的正文：content 可能是数组，也可能是纯字符串。 */
+function eventText(event) {
+  const content = event?.content ?? event?.message?.content ?? event?.text ?? ''
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map(part => (typeof part === 'string' ? part : String(part?.text ?? part?.content ?? '')))
+      .filter(item => item !== '')
+      .join('\n')
+  }
+  return ''
+}
+
+async function sessionText(agent, fromSeq) {
+  const events = await sessionEvents(agent)
+  const replies = events.filter(item => {
+    const type = String(item?.type ?? '')
+    if (type !== 'assistant/message' && type !== 'assistant') return false
+    return Number(item?.seq ?? 0) > fromSeq
+  })
+  return replies.map(eventText).filter(item => item !== '').join('\n\n')
+}
+
+/** 等对方这一轮跑完；超时也算失败，不无限期挂着。 */
+async function waitIdle(agent, timeoutMs) {
+  if (typeof agent?.whenIdle !== 'function') {
+    await new Promise(resolve => setTimeout(resolve, Math.min(timeoutMs, 3000)))
+    return false
+  }
+  try {
+    await agent.whenIdle(timeoutMs)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 每个角色能调的工具各不同：专家自己配了白名单（tools 非空），
+ * 只准调白名单里的工具；没配（空）就按默认全开。
+ * 返回 null 表示放行。
+ */
+function expertToolDenial(config, operator, toolName) {
+  if (operator === null || operator === undefined) return null
+  const id = String(operator.id ?? '').trim()
+  if (id === '') return null
+  const expert = (config?.experts ?? []).find(item => item.id === id)
+  if (expert === undefined) return null
+  const allow = Array.isArray(expert.tools) ? expert.tools.filter(item => String(item ?? '').trim() !== '') : []
+  if (allow.length === 0) return null
+  if (allow.includes(toolName)) return null
+  return `${expert.name} 这个角色的工具白名单里没有 ${toolName}（可用：${allow.slice(0, 8).join('、')}）`
+}
+
+/** 已注册的本体工具名：工具白名单校验与前端勾选清单都靠它。 */
+const TOOL_NAMES = new Set()
+export function registeredToolNames() {
+  return [...TOOL_NAMES]
 }
 
 /** 注册 50 个 ontology_* 工具（其中 11 个是语义层：快照 / 登记 / 校准 / 服务封装 / 建模建议 / 应用蓝图 / 模板 / 手册 / 手册载入 / 手册检索 / 多本体）。 */
@@ -51,6 +133,7 @@ export function registerTools(ctx, store) {
   const disposers = []
   const register = tool => {
     const body = tool.execute
+    TOOL_NAMES.add(tool.name)
     disposers.push(ctx.tools.register({
       ...tool,
       // 专家 agent 调工具也要过成员名单：读操作放行，写要成员、危险的只有管理员。
@@ -67,6 +150,15 @@ export function registerTools(ctx, store) {
             status: 403, ok: false, summary: denial,
           })
           throw new Error(`权限不足：${denial}`)
+        }
+        // 每个角色能调的工具各不同：专家自己配了白名单，就只准调白名单里的。
+        const scopeDenial = expertToolDenial(config, operator, tool.name)
+        if (scopeDenial !== null) {
+          await recordAudit(store, {
+            by: `${operator.name}(AI)`, route: `tool:${tool.name}`, level,
+            status: 403, ok: false, summary: scopeDenial,
+          })
+          throw new Error(`权限不足：${scopeDenial}`)
         }
         try {
           const value = await body(args, exec)
@@ -117,6 +209,10 @@ export function registerTools(ctx, store) {
         additionalProperties: true,
         description: 'Role → model overrides, e.g. {"dev":"deepseek-v4.1-flash","qa":"deepseek-v4.1-flash"}',
       },
+      workflowMode: {
+        type: 'string',
+        description: '工作模式：solo（一个人开发，签字与评审门槛只提示不拦）| team（团队协作，门槛重新拦截）。',
+      },
     },
     async execute(args) {
       const patch = { gitlab: {}, feishu: {}, roles: {} }
@@ -132,6 +228,7 @@ export function registerTools(ctx, store) {
           if (ROLE_IDS.includes(role) && typeof model === 'string') patch.roles[role] = { model }
         }
       }
+      if (args.workflowMode === 'solo' || args.workflowMode === 'team') patch.workflow = { mode: args.workflowMode }
       await host.applyConfig(store, patch)
       return { ok: true, config: publicConfig(store.snapshot().config) }
     },
@@ -1578,6 +1675,167 @@ export function registerTools(ctx, store) {
       return container === null
         ? `已创建本体「${name}」`
         : `已保存本体「${container.name}」（${container.id}｜命名空间 ${container.namespace || '无'}｜v${container.version || '1'}）。用 ontology_asset_save 的 ontologyId 参数把资产放进这个本体。`
+    },
+  }))
+
+  register(defineOntologyTool({
+    name: 'ontology_plan',
+    description: '规划本体开发：把一句业务/需求描述变成「阶段计划 + 每步规范 + 验收标准 + 一版初定本体」，需要时直接落成需求与步骤卡。',
+    parameters: {
+      business: { type: 'string', required: true, description: '业务或需求描述（一两句话即可）。' },
+      title: { type: 'string', description: '计划标题（默认取描述首句）。' },
+      domain: { type: 'string', description: '业务域，如 支付域。' },
+      templateId: { type: 'string', description: '指定领域骨架：general / industrial / safety / health / defense / geo / finance / knowledge（不传按关键词猜）。' },
+      apply: { type: 'boolean', description: 'true = 直接建一条需求 + 每步一张卡；默认只出计划。' },
+      by: { type: 'string', description: '登记人。' },
+    },
+    async execute(args) {
+      const plan = buildPlan({
+        title: args.title,
+        business: args.business,
+        domain: args.domain,
+        templateId: args.templateId,
+      })
+      if (args.apply !== true) return planSummary(plan)
+      const by = String(args.by ?? '').trim() || '规划器'
+      const requirement = await saveRequirement(store, {
+        title: plan.title,
+        description: planSummary(plan),
+        domain: plan.domain,
+        status: 'active',
+        by,
+      })
+      const created = []
+      for (const card of planToCards(plan)) {
+        const task = await host.createTask(store, {
+          title: card.title,
+          type: card.type,
+          requirement: card.requirement,
+          role: card.role,
+          status: card.column,
+          requirementId: requirement.id,
+          checklist: card.checklist,
+          domain: plan.domain,
+        })
+        created.push(task)
+      }
+      return [
+        `已按计划落成需求「${requirement.code || requirement.id} ${requirement.title}」与 ${created.length} 张卡：`,
+        ...created.map(task => `- ${task.code || task.id} ${task.title}（列：${task.status}｜角色：${task.role}）`),
+        '',
+        planSummary(plan),
+      ].join('\n')
+    },
+  }))
+
+  register(defineOntologyTool({
+    name: 'ontology_agent_ask',
+    description: '让另一个角色的 agent 回答问题（agent 之间互相对话）：给出角色/专家名与问题，返回对方的答复原文。',
+    parameters: {
+      to: { type: 'string', required: true, description: '对方的专家 id、专家名或角色 id（business/requirement/data/modeling/backend/frontend/qa）。' },
+      question: { type: 'string', required: true, description: '要问的问题（一次问一件事）。' },
+      taskId: { type: 'string', description: '关联的卡片 id：给了才能顺着这张卡的上下文问，也方便把问答写回卡上。' },
+      timeoutMs: { type: 'number', description: '等对方回答的上限（毫秒，默认 120000）。' },
+    },
+    async execute(args) {
+      const agents = host.getActiveAgents?.()
+      if (agents === null || agents === undefined || typeof agents.get !== 'function') {
+        throw new Error('当前宿主没有可用的 agents 服务，agent 互相对话不可用')
+      }
+      const config = store.snapshot().config
+      const wanted = String(args.to ?? '').trim()
+      const experts = config.experts ?? []
+      const target = experts.find(item => item.id === wanted)
+        ?? experts.find(item => String(item.name ?? '') === wanted)
+        ?? experts.find(item => item.role === wanted)
+      if (target === undefined) throw new Error(`没找到叫「${wanted}」的专家或角色`)
+      const taskId = String(args.taskId ?? '').trim()
+      const question = String(args.question ?? '').trim()
+      if (question === '') throw new Error('question 不能为空')
+      // 找对方活着的会话：优先本卡专属会话，其次该专家任意在跑的会话。
+      const candidates = []
+      if (taskId !== '') candidates.push(`ontology-${taskId}-${target.id}`)
+      const dispatcher = host.getActiveDispatcher?.()
+      if (dispatcher?.running instanceof Map) {
+        for (const info of dispatcher.running.values()) {
+          if (info?.expert === target.id && info.sessionId !== undefined) candidates.push(info.sessionId)
+        }
+      }
+      if (typeof agents.list === 'function') {
+        for (const agent of agents.list() ?? []) {
+          if (String(agent?.id ?? '').endsWith(`-${target.id}`)) candidates.push(agent.id)
+        }
+      }
+      const sessionId = candidates.find(id => {
+        try {
+          return agents.get(id) !== null && agents.get(id) !== undefined
+        } catch {
+          return false
+        }
+      })
+      if (sessionId === undefined) {
+        return `「${target.name}」现在没有在跑的会话，没法直接问。先把卡派给这个角色（ontology_task_update 或看板拖到对应列），或带上正确的 taskId 再问。`
+      }
+      const agent = agents.get(sessionId)
+      const stamp = Date.now()
+      const before = await sessionSeq(agent)
+      agent.followup({
+        id: `ontology-ask-${stamp}`,
+        role: 'user',
+        content: [{ type: 'text', text: `【来自另一个角色的提问】${question}\n\n请直接回答这个问题，答案要能落地：结论先行，然后给依据与下一步。` }],
+        source: { kind: 'user' },
+      })
+      const timeoutMs = Number(args.timeoutMs ?? 120000) || 120000
+      await waitIdle(agent, timeoutMs)
+      const answer = await sessionText(agent, before)
+      if (taskId !== '') {
+        try {
+          await commentTask(store, taskId, `【向 ${target.name} 提问】${question}\n\n【${target.name} 回答】${answer || '（对方没有给出文字答复）'}`, target.name, 'agent')
+        } catch {
+          /* 写不回卡上也要把答复给调用方 */
+        }
+      }
+      return `${target.name}（${target.role}）的答复：\n${answer || '（对方没有给出文字答复，可能这一轮没输出文本）'}`
+    },
+  }))
+
+  register(defineOntologyTool({
+    name: 'ontology_skill_builtin',
+    description: '列出或安装内置的本体开发规范技能（场景筛选/价值定义/需求澄清/数据治理/对象建模/规则建模/动作建模/服务共享/后端实现/前端实现/联调测试）。',
+    parameters: {
+      action: { type: 'string', description: 'list（列出，默认）| install（装进技能库）。' },
+      name: { type: 'string', description: '只处理某一条技能（不传=全部）。' },
+    },
+    async execute(args) {
+      const action = String(args.action ?? 'list').trim()
+      const picked = String(args.name ?? '').trim()
+      const list = BUILTIN_SKILLS.filter(item => picked === '' || item.name === picked)
+      if (list.length === 0) throw new Error(`没有叫「${picked}」的内置技能`)
+      if (action === 'list') {
+        return [
+          `内置规范技能 ${list.length} 条：`,
+          ...list.map(item => `- ${item.name}：${item.description}`),
+        ].join('\n')
+      }
+      if (action !== 'install') throw new Error('action 只能是 list 或 install')
+      const skills = host.getActiveSkills?.()
+      if (skills === null || skills === undefined || typeof skills.save !== 'function') {
+        throw new Error('技能库还没就绪，稍后再试')
+      }
+      let created = 0
+      for (const item of list) {
+        const existing = skills.get?.(item.name)
+        if (existing !== null && existing !== undefined) continue
+        await skills.save({
+          name: item.name,
+          description: item.description,
+          content: item.content,
+          whenToUse: item.whenToUse ?? '',
+          tags: item.tags ?? [],
+        })
+        created += 1
+      }
+      return `已安装 ${created} 条内置规范技能（共 ${list.length} 条，已存在的跳过）。装好后各角色 agent 可以直接用 skill 工具加载。`
     },
   }))
 

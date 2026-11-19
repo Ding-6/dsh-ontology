@@ -9,23 +9,25 @@ import { sanitizeWebhooks } from './webhooks.js'
 import { sanitizeCaseShell } from './shell-case.js'
 import { LIMIT_DEFAULTS, sanitizeLimits } from './limits.js'
 import { DEFAULT_ROLES } from './roles.js'
+import { sanitizeExpertMcp, sanitizeExpertPlugins, sanitizeExpertTools } from './expert-capability.js'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 /**
- * 看板列 = 本体建模的生命周期阶段，渲染顺序即推进顺序：
- * 场景筛选 → 语义设计 → 待生成 → 建模中（AI 生成约 80%）→ 专家校准（约 20%）
- * → 一致性校验 → 场景验收 → 已发布。
+ * 看板列 = 单人开发模式下「本体建模工程落地标准动作」的推进顺序，
+ * 一列一个角色位：谁干这活，卡就停在哪一列。
+ * 场景筛选 → 需求设计 → 数据治理 → 本体建模 → 后端与服务 → 前端实现 → 联调测试 → 已完成。
+ * （原「待生成/建模中/专家校准/场景验收」四列与「产品/架构/建模/校验」四角色已在 schema 8 迁移成新列。）
  */
 export const STATUSES = [
-  { id: 'clarify', label: '场景筛选', role: 'product' },
-  { id: 'design', label: '语义设计', role: 'architect' },
-  { id: 'dev_ready', label: '待生成', role: 'dev' },
-  { id: 'dev', label: '建模中', role: 'dev' },
-  { id: 'review', label: '专家校准', role: 'architect' },
-  { id: 'test', label: '一致性校验', role: 'qa' },
-  { id: 'accept', label: '场景验收', role: 'product' },
-  { id: 'done', label: '已发布', role: 'product' },
+  { id: 'clarify', label: '场景筛选', role: 'business' },
+  { id: 'design', label: '需求设计', role: 'requirement' },
+  { id: 'data', label: '数据治理', role: 'data' },
+  { id: 'model', label: '本体建模', role: 'modeling' },
+  { id: 'backend', label: '后端与服务', role: 'backend' },
+  { id: 'frontend', label: '前端实现', role: 'frontend' },
+  { id: 'test', label: '联调测试', role: 'qa' },
+  { id: 'done', label: '已完成', role: 'business' },
 ]
 
 /** 阻塞不是车道，是卡上的一个标记：卡留在原列，等人决定怎么继续。 */
@@ -34,7 +36,7 @@ export const LEGACY_BLOCKED_STATUS = 'blocked'
 export const STATUS_IDS = STATUSES.map(s => s.id)
 /** 解析时接受历史数据里的 blocked，但它永远不会被当成一列渲染。 */
 export const STATUS_SET = new Set([...STATUS_IDS, LEGACY_BLOCKED_STATUS])
-export const ROLE_IDS = ['product', 'architect', 'dev', 'qa']
+export const ROLE_IDS = ['business', 'requirement', 'data', 'modeling', 'backend', 'frontend', 'qa']
 export const PRIORITIES = ['urgent', 'normal', 'relaxed']
 /** 卡片类型：需求与缺陷走同一条流水线，但派单提示词和默认落列不同。 */
 export const TASK_TYPES = ['requirement', 'bug', 'design', 'dev', 'test', 'ops']
@@ -104,19 +106,19 @@ export const FALLBACK_AGENT_MODEL = 'deepseek-v4.1-flash'
 /** Column → who owns the work when a card lands there. */
 export function defaultColumns() {
   return {
-    // 待澄清没有默认负责人：需求/缺陷的类型不同，交给谁由人来定（设置里可改）。
+    // 场景筛选没有默认负责人：需求/缺陷的类型不同，交给谁由人来定（设置里可改）。
     clarify: { kind: 'none', id: '' },
-    design: { kind: 'expert', id: 'architect' },
-    dev_ready: { kind: 'expert', id: 'dev' },
-    dev: { kind: 'expert', id: 'dev' },
-    review: { kind: 'expert', id: 'architect' },
-    test: { kind: 'expert', id: 'qa' },
-    accept: { kind: 'expert', id: 'product' },
-    done: { kind: 'expert', id: 'product' },
+    design: { kind: 'role', id: 'requirement' },
+    data: { kind: 'role', id: 'data' },
+    model: { kind: 'role', id: 'modeling' },
+    backend: { kind: 'role', id: 'backend' },
+    frontend: { kind: 'role', id: 'frontend' },
+    test: { kind: 'role', id: 'qa' },
+    done: { kind: 'role', id: 'business' },
   }
 }
 
-/** The four shipped experts, used until the company edits them. */
+/** The shipped experts, used until the company edits them. */
 export function seedExperts(roles) {
   return ROLE_IDS.map(role => {
     const seed = DEFAULT_ROLES[role]
@@ -128,7 +130,9 @@ export function seedExperts(roles) {
       emoji: seed.emoji,
       role,
       domain: '',
-      skills: [],
+      skills: [...(seed.skills ?? [])],
+      /** 该角色允许调用的工具白名单（空 = 不限制）。 */
+      tools: [...(seed.tools ?? [])],
       description: seed.brief,
       prompt: String(roles?.[role]?.prompt ?? '') || String(seed.prompt ?? ''),
       model: String(roles?.[role]?.model ?? seed.model),
@@ -141,7 +145,7 @@ export function seedExperts(roles) {
 /** Fresh default settings. */
 export function defaultConfig() {
   return {
-    schema: 7,
+    schema: 8,
     board: { title: '本体建模工作空间' },
     experts: seedExperts(DEFAULT_ROLES),
     teams: [],
@@ -157,15 +161,23 @@ export function defaultConfig() {
     /** 数量上限：以前是硬编码在路由里的 60/60/40，超了静默丢。 */
     limits: { ...LIMIT_DEFAULTS },
     /** 设计评审闸门：打开后，卡进 columns 里的列之前设计必须 approved。 */
-    design: { enabled: false, columns: ['dev'] },
+    design: { enabled: false, columns: ['model'] },
     /** 成本闸门：只统计「跑了多少次、花了多少机上时间」，宿主没把 token 用量回传给插件。 */
     costs: { budgetRuns: 500, budgetHours: 80, warnAt: 80 },
     roles: {
-      product: { label: '业务', model: 'deepseek-v4.1-flash', prompt: '' },
-      architect: { label: '架构', model: 'deepseek-v4.1-flash', prompt: '' },
-      dev: { label: '建模', model: 'deepseek-v4.1-flash', prompt: '' },
-      qa: { label: '校验', model: 'deepseek-v4.1-flash', prompt: '' },
+      business: { label: '业务', model: 'deepseek-v4.1-flash', prompt: '' },
+      requirement: { label: '需求', model: 'deepseek-v4.1-flash', prompt: '' },
+      data: { label: '数据', model: 'deepseek-v4.1-flash', prompt: '' },
+      modeling: { label: '建模', model: 'deepseek-v4.1-flash', prompt: '' },
+      backend: { label: '后端', model: 'deepseek-v4.1-flash', prompt: '' },
+      frontend: { label: '前端', model: 'deepseek-v4.1-flash', prompt: '' },
+      qa: { label: '测试', model: 'deepseek-v4.1-flash', prompt: '' },
     },
+    /**
+     * 工作方式：solo = 一个人开发，不需要谁审批（签字/评审降级为提示）；
+     * team = 保留团队协作的准出与评审门禁。
+     */
+    workflow: { mode: 'solo' },
     /**
      * 本体语义层设置：AI 自动生成与专家审核校准的比例、校准闸门、服务封装默认协议。
      */
@@ -188,7 +200,7 @@ export function defaultConfig() {
       workspaceDir: '',
       /** Agent preset that gives the card session its real tools (shell, fs). */
       agentPreset: 'standard',
-      autoStatuses: ['design', 'dev_ready', 'test'],
+      autoStatuses: ['design', 'data', 'test'],
       /** 沙箱：卡会话的操作系统级文件/命令边界（DSH 的 permission preset）。 */
       sandbox: 'workspace-write',
       /** 隔离：none = 所有卡共用 workspaceDir；worktree = 每张卡一个 git worktree。 */
@@ -389,6 +401,11 @@ export function mergeConfig(saved) {
     gitlab,
     feishu,
     roles: mergeSection(base.roles, saved.roles),
+    // 工作方式：solo/team。加了这个键必须在这里也列一遍，否则重启一次配置就被 mergeConfig 抹掉。
+    workflow: (() => {
+      const merged = { ...base.workflow, ...(saved.workflow !== null && typeof saved.workflow === 'object' ? saved.workflow : {}) }
+      return { mode: merged.mode === 'team' ? 'team' : 'solo' }
+    })(),
     market: mergeSection(base.market, saved.market),
     agents: mergeSection(base.agents, saved.agents),
     testing: sanitizeTesting(saved.testing),
@@ -400,7 +417,7 @@ export function mergeConfig(saved) {
     // 设计闸门：加了这个键就必须在这里也列一遍，否则重启一次配置就被 mergeConfig 抹掉。
     design: (() => {
       const merged = { ...base.design, ...(saved.design !== null && typeof saved.design === 'object' ? saved.design : {}) }
-      return { enabled: merged.enabled === true, columns: (Array.isArray(merged.columns) ? merged.columns : ['dev']).map(String).slice(0, 8) }
+      return { enabled: merged.enabled === true, columns: (Array.isArray(merged.columns) ? merged.columns : ['model']).map(String).slice(0, 8) }
     })(),
     environments: (() => {
       const list = sanitizeDeployEnvs(saved.environments)
@@ -474,6 +491,12 @@ export function sanitizeExperts(input) {
         .filter(skill => skill.length > 0)
         .filter((skill, index, all) => all.indexOf(skill) === index)
         .slice(0, 12),
+      /** 该专家允许调用的工具白名单（空 = 不限制，多 = 只能调这些）。 */
+      tools: sanitizeExpertTools(raw.tools),
+      /** 该专家接入的 MCP：[{ serverName, transport, command|url, args }]。 */
+      mcp: sanitizeExpertMcp(raw.mcp),
+      /** 该专家额外挂载的插件包名（运行时需要宿主已安装该包）。 */
+      plugins: sanitizeExpertPlugins(raw.plugins),
       model: String(raw.model ?? '').trim().slice(0, 120),
       preset: String(raw.preset ?? '').trim().slice(0, 80),
       /** 该专家自己的沙箱档位；空 = 跟随「设置 → 自动派单」的全局档位。 */

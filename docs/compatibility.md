@@ -6,7 +6,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| dsh-ontology | `package.json` `version: 0.6.0` |
+| dsh-ontology | `package.json` `version: 0.7.0` |
 | DeepSeek Harness | `0.2.2-rc.1`（`dsh --version`） |
 | Node | `v24.22.2`（Linux 目标机）；本机 Windows `v24.19.0` |
 | 目标系统 | Ubuntu 24.04，`dsh web` 监听 `18080`，nginx `:80` 反代并注入 `dsh-auth-*` cookie |
@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | `export const inject = ['tools','systemPrompt']` | 插件声明必须的服务 | 插件不加载；面板消失 |
 | `ctx.systemPrompt.section({ name, order, text })` | 注入 `ontology-protocol`（order 70），告诉 agent 如何用 `ontology_*` 工具 | agent 不写讨论、不推进卡片 |
-| `ctx.tools.register(tool)` ×50 | 全部 `ontology_*` 工具（建卡、派单、门禁、发布、语义层资产 11 个…） | 工具消失；LLM 报 unknown tool |
+| `ctx.tools.register(tool)` ×53 | 全部 `ontology_*` 工具（建卡、派单、门禁、发布、语义层资产 11 个…） | 工具消失；LLM 报 unknown tool |
 | `ctx.inject(['webServer'], ctx => ctx.webServer.register({ kind:'prefix', path:'/ontology-api', handler }))` | 所有 HTTP 路由（130+ 条，含 `/suite/*`、`/coding/gitlab`、`/requirement/impact`、`/task/design`、`/ontology/guide/book`） | 前端全 404，面板空壳 |
 | `ctx.inject(['agents','sessionController','workspaceRegistry','permissionPresets','agentDefaultModel'], …)` | 派单引擎 `Dispatcher`：起会话、发指令、收 `agent/status` 事件 | 派单报「这一列还没人负责」或会话永远 idle |
 | `ctx.agents.create / resume / get / list / abort` | 一卡一会话（`ontology-<taskId>-<expertId>`） | 会话起不来；`has no provider/model`；槽位泄漏 |
@@ -33,6 +33,9 @@
 | `llm.listModels(provider.id)`（模型下拉） | `/models` 端点 | 模型列表为空 |
 | `llm.listModels(provider.id)`（模型下拉） | `/models` 端点 | 模型列表为空 |
 | `ctx.inject(['sessionProjections'])` → `stateOf(session, 'tokenMeasurement')` | 派单收尾（`dispatcher.settle`）趁会话还活着取引擎自己的 token 计量，落到卡的 `insight` | 取不到就只是少一行「引擎计量」，不影响派单；宿主改名/改签名时报 `session.snapshotEvents is not a function` |
+| `scope.tools.restrict({ allow })`（agent scope 上） | 给每个角色限定可调用的 `ontology_*` 工具（专家配了白名单才生效） | 宿主没有这个方法时降级为「不限制」，功能仍在但白名单形同虚设 |
+| `ctx.inject(['agentPresets'])` → `presets.register({ id, name, plugins })` + `presets.mount(scope, id)` | 按专家配置挂载额外插件包与 MCP 服务（`@deepseek-ai/dsh-mcp-client`） | 宿主没有 agentPresets 或 MCP 插件没装时该专家的 MCP 不生效，其余能力照常 |
+| `agent.session.snapshotEvents()` + `agent.whenIdle()` | `ontology_agent_ask`：让一个角色去问另一个角色，取回答复写回卡片 | 取不到事件时返回「没拿到答复」，不影响派单 |
 
 已知会直接暴露的宿主错误文案（排障关键词）：
 

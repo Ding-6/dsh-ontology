@@ -327,6 +327,82 @@ export class StudioStore {
       }
       this.state.config.schema = 6
     }
+    // v7：单人开发模式。板列从「产品/架构/建模/校验」四角色 + 八列旧语义，
+    // 换成「业务/需求/数据/建模/后端/前端/测试」七角色 + 八列标准动作；
+    // 签字与评审这类「谁批一下」的门槛降级为提示（workflow.mode=solo）。
+    if (Number(this.state.config.schema ?? 1) < 8) {
+      const statusMap = { dev_ready: 'data', dev: 'model', review: 'backend', accept: 'frontend' }
+      const roleMap = { product: 'business', architect: 'requirement', dev: 'modeling' }
+      for (const task of this.state.tasks) {
+        if (statusMap[task.status] !== undefined) task.status = statusMap[task.status]
+        if (roleMap[task.role] !== undefined) task.role = roleMap[task.role]
+        for (const item of task.history ?? []) {
+          if (statusMap[item.status] !== undefined) item.status = statusMap[item.status]
+        }
+      }
+      // 专家：角色位跟着换；再保证七个新角色位都有人（缺谁补一个出厂专家）。
+      const experts = this.state.config.experts ?? []
+      for (const expert of experts) {
+        if (roleMap[expert.role] !== undefined) expert.role = roleMap[expert.role]
+        if (!ROLE_IDS.includes(expert.role)) expert.role = ROLE_IDS.includes(expert.id) ? expert.id : ''
+      }
+      for (const role of ROLE_IDS) {
+        if (experts.some(expert => expert.role === role)) continue
+        const seed = DEFAULT_ROLES[role]
+        if (seed === undefined) continue
+        experts.push({
+          id: role,
+          name: seed.name,
+          emoji: seed.emoji,
+          role,
+          domain: '',
+          skills: [...(seed.skills ?? [])],
+          tools: [...(seed.tools ?? [])],
+          description: seed.brief,
+          prompt: String(seed.prompt ?? ''),
+          promptVersion: createHash('sha1').update(String(seed.prompt ?? '')).digest('hex').slice(0, 8),
+          model: seed.model,
+          preset: '',
+          enabled: true,
+        })
+      }
+      this.state.config.experts = experts
+      // 列：旧列名换成新列名，负责人一律改成角色位。
+      // 旧配置里有些列绑的是「某个具体专家」（kind: 'expert'），那个专家在单人模式下
+      // 未必还在角色位上，留着会派不到人 —— 所以统一改成按角色位接单。
+      const columns = this.state.config.columns ?? {}
+      const columnMap = { dev_ready: 'data', dev: 'model', review: 'backend', accept: 'frontend' }
+      const columnRole = { clarify: '', design: 'requirement', data: 'data', model: 'modeling', backend: 'backend', frontend: 'frontend', test: 'qa', done: 'business' }
+      const next = {}
+      for (const key of Object.keys(columns)) {
+        const id = columnMap[key] ?? key
+        if (columnRole[id] === undefined) continue
+        next[id] = columnRole[id] === '' ? { kind: 'none', id: '' } : { kind: 'role', id: columnRole[id] }
+      }
+      for (const [id, role] of Object.entries(columnRole)) {
+        if (next[id] === undefined) next[id] = role === '' ? { kind: 'none', id: '' } : { kind: 'role', id: role }
+      }
+      this.state.config.columns = next
+      // 角色配置（模型/提示词）与自动派单列也跟着换名。
+      const roles = this.state.config.roles ?? {}
+      const nextRoles = {}
+      for (const [key, value] of Object.entries(roles)) {
+        nextRoles[roleMap[key] ?? key] = value
+      }
+      for (const role of ROLE_IDS) {
+        if (nextRoles[role] === undefined) nextRoles[role] = { label: DEFAULT_ROLES[role]?.label ?? role, model: DEFAULT_ROLES[role]?.model ?? 'deepseek-v4.1-flash', prompt: '' }
+      }
+      this.state.config.roles = nextRoles
+      const agents = this.state.config.agents ?? {}
+      agents.autoStatuses = (agents.autoStatuses ?? []).map(item => statusMap[item] ?? item).filter(item => STATUS_IDS.includes(item))
+      this.state.config.agents = agents
+      const design = this.state.config.design ?? {}
+      design.columns = (design.columns ?? []).map(item => statusMap[item] ?? item).filter(item => STATUS_IDS.includes(item))
+      this.state.config.design = design
+      const workflow = this.state.config.workflow ?? {}
+      this.state.config.workflow = { mode: workflow.mode === 'team' ? 'team' : 'solo' }
+      this.state.config.schema = 8
+    }
   }
 
   snapshot() {

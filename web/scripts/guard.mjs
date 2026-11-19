@@ -172,8 +172,10 @@ if (mode === 'post') {
     // 再往上就该考虑拆包了 —— 单文件 IIFE 一旦超过 ~1.5 MB，宿主首屏会明显变慢。
     // 2026-11-19：语义层页签通用化（多本体 / 建模建议 / 领域骨架 / 应用蓝图 / 操作手册）
     // 使产物到 1460.4 kB，模块数没变（3488，不是偷偷拉进一整包），按实际抬到 1470 kB。
-    if (sizeKb > 1470) {
-      failures.push(`dist/client.js is ${sizeKb.toFixed(1)} kB — over the 1.44 MB watch line, check what got pulled in`)
+    // 2026-11-19：单人开发模式（规划页签 pages/plan.js + 专家能力配置 tools/plugins/mcp
+    // + 53 个工具名清单）到 1477.7 kB，模块数只 +1（3489），仍是新功能本身，按实际抬到 1490 kB。
+    if (sizeKb > 1490) {
+      failures.push(`dist/client.js is ${sizeKb.toFixed(1)} kB — over the 1.45 MB watch line, check what got pulled in`)
     }
   }
 }

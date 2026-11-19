@@ -23,10 +23,13 @@ export function configureDispatcher(services) {
 
 /** What each role is expected to do with the card it is handed. */
 export const ROLE_BRIEF = {
-  product: '澄清本体场景：补齐业务目标、范围、验收标准，写进 requirement 字段；能开工就把卡推进到「语义设计」。',
-  architect: '设计语义模型：划分业务对象与属性、定义对象关系与规则表达式、规划可调用行动与接口；用 ontology_blueprint 给出数据模型/规则引擎/API 契约/前端设计/本体驱动/测试六章；结论写进评论并附关键定义；定稿后推进到「待生成」。',
-  dev: '落地语义资产：用 ontology_asset_save 登记对象/关系/规则/行动，改动小步可验证；用 ontology_review_advice 清缺口；登记完整、缺口清零后推进到「专家校准」。',
-  qa: '校验语义层：检查属性齐备、关系无悬挂、规则有判定表达式、行动有目标与前置；接口类用 ontology_test_run 真跑；记录实际校验方式与结果；通过推进到「场景验收」，不通过退回「建模中」并写明原因。',
+  business: '筛选本体场景：按五条门槛给出结论与价值口径，写进 requirement 字段；能开工就把卡推进到「需求设计」。',
+  requirement: '澄清需求：写清背景/目标/范围/不做/验收/风险六段，拆成能独立验收的卡；定稿后推进到「数据治理」。',
+  data: '治理数据：盘点字段来源与口径，登记数据到本体的映射与质量规则；数据齐备后推进到「本体建模」。',
+  modeling: '落地语义资产：用 ontology_asset_save 登记对象/关系/规则/行动，用 ontology_review_advice 清缺口；登记完整、缺口清零后推进到「后端与服务」。',
+  backend: '建模行动并实现服务：写清契约与六要素行动，用 ontology_service_export 生成 MCP/SDK，改完登记执行记录；完成后推进到「前端实现」。',
+  frontend: '实现前端：按蓝图对齐页面、表单与校验，改完登记执行记录；完成后推进到「联调测试」。',
+  qa: '联调测试：写用例并真跑，失败自动开缺陷卡；全通过后推进到「已完成」，不通过退回对应环节并写明原因。',
 }
 
 /** 一个角色位在本领域下的候选人：本领域优先，其次通用（没有领域归属），最后其他领域。 */
@@ -402,6 +405,8 @@ export class Dispatcher {
     this.store = store
     this.timer = undefined
     this.running = new Map()
+    /** 已注册的「角色专属 preset」id：插件/MCP 挂载用，注册过就不重复注册。 */
+    this.expertPresets = new Map()
     this.log = []
     this.lastTickAt = 0
     this.lastError = ''
@@ -785,15 +790,76 @@ export class Dispatcher {
     const presets = this.ctx.get?.('agentPresets')
     if (presets === undefined) return undefined
     const wanted = String(expert.preset ?? '').trim() || cfg.agentPreset || 'standard'
+    let agentPreset = 'standard'
     try {
       const resolved = await presets.resolve(wanted)
-      return {
-        agentPreset: resolved.id,
-        setup: async scope => { await presets.mount(scope, resolved.id) },
-      }
+      agentPreset = resolved.id
     } catch (error) {
       this.note(`preset "${wanted}" unavailable: ${error?.message ?? error}`)
       return undefined
+    }
+    const setup = async scope => {
+      try {
+        await presets.mount(scope, agentPreset)
+      } catch (error) {
+        this.note(`preset mount failed: ${error?.message ?? error}`)
+      }
+      await this.applyExpertScope(scope, expert, presets)
+    }
+    return { agentPreset, setup }
+  }
+
+  /**
+   * 每个角色能调的工具、用的插件、接的 MCP 都不一样：这些差异落在 agent 自己的
+   * scope 里（不是全局），所以只影响这个角色，不影响别的 agent。
+   * 宿主不支持的（没装 mcp-client、restrict 不认）就降级，不让派单失败。
+   */
+  async applyExpertScope(scope, expert, presets) {
+    if (scope === null || scope === undefined) return
+    // 1) 工具白名单：这个角色只准调自己那一套工具。
+    const allow = Array.isArray(expert.tools) ? expert.tools.filter(item => String(item ?? '').trim() !== '') : []
+    if (allow.length > 0 && typeof scope.tools?.restrict === 'function') {
+      try {
+        scope.tools.restrict({ allow })
+      } catch (error) {
+        this.note(`tool restrict failed for ${expert.id}: ${error?.message ?? error}`)
+      }
+    }
+    // 2) 角色规范：写成这个 agent 自己的系统提示段（同名段遮蔽全局段）。
+    const roleText = String(expert.prompt ?? '').trim() !== ''
+      ? String(expert.prompt)
+      : String(DEFAULT_ROLES[expert.role]?.prompt ?? '')
+    if (roleText !== '' && typeof scope.systemPrompt?.section === 'function') {
+      try {
+        scope.systemPrompt.section({ name: `ontology-role:${expert.role}`, order: 71, text: roleText })
+      } catch (error) {
+        this.note(`role prompt section failed for ${expert.id}: ${error?.message ?? error}`)
+      }
+    }
+    // 3) 插件与 MCP：运行时注册一个专属 preset 再挂到 scope 上。
+    const plugins = []
+    for (const name of Array.isArray(expert.plugins) ? expert.plugins : []) {
+      const plugin = String(name ?? '').trim()
+      if (plugin === '') continue
+      plugins.push({ id: `plugin-${plugin.replace(/[^A-Za-z0-9_-]/g, '-')}`, name: plugin })
+    }
+    for (const server of Array.isArray(expert.mcp) ? expert.mcp : []) {
+      const config = { transport: server.transport, serverName: server.serverName }
+      for (const key of ['command', 'args', 'env', 'cwd', 'url', 'headers']) {
+        if (server[key] !== undefined) config[key] = server[key]
+      }
+      plugins.push({ id: `mcp-${server.serverName}`, name: '@deepseek-ai/dsh-mcp-client', config })
+    }
+    if (plugins.length === 0 || presets === undefined) return
+    const presetId = `ontology-expert-${expert.id}`
+    try {
+      if (this.expertPresets.has(presetId) === false) {
+        presets.register({ id: presetId, name: `本体角色能力·${expert.name}`, plugins })
+        this.expertPresets.set(presetId, true)
+      }
+      await presets.mount(scope, presetId)
+    } catch (error) {
+      this.note(`expert preset failed for ${expert.id}: ${error?.message ?? error}`)
     }
   }
 
@@ -937,26 +1003,23 @@ export function buildExpertPrompt(task, expert, column, config, team, instructio
     task.worktree !== null && task.worktree !== undefined
       ? `\n你的工作目录是这张卡专属的 git worktree：${task.worktree.path}${task.worktree.serviceName ? `（服务：${task.worktree.serviceName}）` : ''}\n分支 ${task.worktree.branch}（基线 ${task.worktree.base}），仓库 ${task.worktree.repo}。只在这个目录里改代码，提交到这条分支，不要动别人的 worktree 或主分支。`
       : '',
-    column.id === 'dev' || column.id === 'dev_ready'
-      ? `\n这是研发环节，做完必须留下可审计的执行记录：调用 ontology_task_coding，如实填写 agent/model、分支、commits（sha + message + 改动文件数）、改动文件清单、单测总数与通过数，以及你依据的需求基线版本。没登记执行记录的「完成」不算完成。`
+    column.id === 'model' || column.id === 'backend' || column.id === 'frontend'
+      ? `\n这是要落代码/落资产的环节，做完必须留下可审计的执行记录：调用 ontology_task_coding，如实填写 agent/model、分支、commits（sha + message + 改动文件数）、改动文件清单、单测总数与通过数，以及你依据的需求基线版本。没登记执行记录的「完成」不算完成。`
       : '',
-    column.id === 'review'
-      ? `\n这是评审环节：先读 MR 的改动（glab mr diff 或在 GitLab 上看），逐条对照方案、验收清单和执行记录里的 files / commits / 单测结果，把问题写清楚（文件、行、为什么、建议怎么改）。评完用 ontology_task_coding action=review 写结论（approved / changes_requested + 说明）；没问题就说明通过理由，推进到「待测试」，有问题就 @ 开发同学，把卡退回「开发中」。`
+    column.id === 'backend'
+      ? `\n这是后端与服务环节：先写契约（路径/方法/请求体/响应体/错误码）与行动六要素，再用 ontology_service_export 生成 MCP 工具或本体 SDK；实现后自己对照契约与验收清单自审一遍，评论里写清改了什么、为什么这么改；确认没问题就推进到「前端实现」，有问题就 @ 建模同学，把卡退回「本体建模」。`
       : '',
     task.requirement ? `\n需求描述：\n${task.requirement}` : '',
-    column.id === 'review'
-      ? `\n这是评审环节：先读 MR 的改动（glab mr diff 或在 GitLab 上看），逐条对照方案与验收清单，把问题写清楚（文件、行、为什么、建议怎么改）。没问题就说明通过理由，推进到「待测试」；有问题就 @ 开发同学，把卡退回「开发中」。`
-      : '',
     column.id === 'test'
-      ? `\n这是测试环节：先用 ontology_task_case 把用例登记到卡上（做什么、期望什么）；**能写成接口调用的，就把 method/url/expectStatus/expectContains 一起写上，用 ontology_test_run 让平台真的去跑**（它会发请求、比对状态码与响应体、把结果写回用例并留下执行记录，失败的自动开缺陷卡）。只有跑不了的用例（要人工操作、要看 UI、要连设备）才自己执行并用 result 回填 pass/fail/skip，失败要写清环境与复现步骤。**用例一旦判 fail，平台会自动开一张缺陷卡（挂同一需求、父任务指向本卡），你不用再手工建 Bug，也不要重复建**。全部用例有结论后：有用例失败就 @ 开发同学退回「开发中」；全通过就推进到「待验收」，并登记一份测试报告（kind=cases）。` +
-        (task.bugSource == null ? '' : `\n这张卡来自缺陷 ${task.bugSource.code || task.bugSource.taskId}（用例「${task.bugSource.caseTitle}」）。修复已进入待测试，平台把来源用例重置成了待执行：请复跑这一条，确认通过后把本卡推进到「待验收」，并通过就把缺陷关闭。`)
+      ? `\n这是联调测试环节：先用 ontology_task_case 把用例登记到卡上（做什么、期望什么）；**能写成接口调用的，就把 method/url/expectStatus/expectContains 一起写上，用 ontology_test_run 让平台真的去跑**（它会发请求、比对状态码与响应体、把结果写回用例并留下执行记录，失败的自动开缺陷卡）。只有跑不了的用例（要人工操作、要看 UI、要连设备）才自己执行并用 result 回填 pass/fail/skip，失败要写清环境与复现步骤。**用例一旦判 fail，平台会自动开一张缺陷卡（挂同一需求、父任务指向本卡），你不用再手工建 Bug，也不要重复建**。全部用例有结论后：有用例失败就 @ 负责该环节的同学退回上一列；全通过就推进到「已完成」，并登记一份测试报告（kind=cases）。` +
+        (task.bugSource == null ? '' : `\n这张卡来自缺陷 ${task.bugSource.code || task.bugSource.taskId}（用例「${task.bugSource.caseTitle}」）。修复已进入待测试，平台把来源用例重置成了待执行：请复跑这一条，确认通过后把本卡推进到「已完成」，并通过就把缺陷关闭。`)
       : '',
     task.type === 'bug'
       ? `\n这是一张缺陷卡（严重级别 ${String(task.severity || 'p2').toUpperCase()}），不是新需求，处理方式不同：
 - 先复现：写清触发条件、环境、实际结果与期望结果；复现不了就说明缺什么信息。
 - 再定位根因：指出是哪一层 / 哪个模块 / 哪次改动导致的，能用 git log、git blame 佐证的贴出来。
 - 修复最小化，只动与缺陷相关的代码；评论里列出改动文件、影响范围、回归点。
-- 修完推进到「待测试」，并把复现步骤和回归清单贴给测试同学。`
+- 修完推进到「联调测试」，并把复现步骤和回归清单贴给测试同学。`
       : '',
     task.gitlabIssue ? `\nGitLab Issue：${task.gitlabIssue}` : '',
     task.blockedReason ? `\n上次阻塞原因：${task.blockedReason}` : '',

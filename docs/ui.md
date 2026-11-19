@@ -956,7 +956,17 @@ Toaster。剩下自研的都是「官方没有、或者语义不兼容」的部�
 - **三处同步**：页面改动要同时进 `client.src.js`（页签清单与头部统计）、`web/scripts/make-legacy.mjs`（固定 import 清单）、
   `web/src/studio/labels.js`（词表），再跑 `cd web && pnpm run build`。
 
-## 内置平台操作手册（0.5.0）
+## 规划页签与单人开发模式（0.7.0）
+
+- **文件**：`web/src/studio/pages/plan.js`（新页面模块，与语义层页签同款结构）。
+  新增页签的三处同步仍然要一起做：`client.src.js` 的页签清单与头部统计、`web/scripts/make-legacy.mjs` 的固定 import 清单、`web/src/studio/labels.js` 的词表。
+- **页面结构**：业务描述 / 标题 / 业务域 / 骨架模板四个输入 → 「生成计划」→ 七段阶段计划（每段：目标、规范、负责角色、技能、步骤与产出物）
+  → 初定版本四类计数（对象 / 关系 / 规则 / 行动）→ 待确认三问 → 内置规范技能清单（带是否已安装）→「落成需求 + 步骤卡」。
+  落成后列出新卡（编号 / 标题 / 所在列 / 负责角色），可点开卡片抽屉。
+- **样式**：全部复用 `ds-panel(-head/-body)` / `ds-stat-box` / `ds-listrow` / `ds-chip` / `ds-btn` / `ds-hint` / `ds-row` / `ds-input`，没有新造类名。
+- **专家能力配置**（`web/src/studio/panels/people.js` 的抽屉）：工具白名单按 `TOOL_GROUP_LABEL` 分组勾选（53 个工具，留空 = 不限制）、
+  插件包名（MCP 的 `args` 在表单里是空格分隔的一行，保存前拆成数组）、MCP 服务（stdio 填 command，streamable-http 填 url）。
+- **工作模式开关**（设置 → 专家与角色最上面）：两个按钮切 `config.workflow.mode`，单人开发下签字与评审门槛只提示不拦。
 
 - **数据来源**：`src/host/ontology-guide-book.js`（生成物，随包分发）——`GUIDE_BOOK` =《智元·本体智能体平台操作手册 V2.0》
   的 86 个章节，每篇 { id, section, title, tags, body }；`guideBookGuides()` 转成手册库条目，

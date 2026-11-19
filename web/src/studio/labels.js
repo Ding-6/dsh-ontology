@@ -2,7 +2,13 @@
    Pure tables — no React, no API access — so they can be imported by any
    page module without dragging the panel along. */
 
-export const ROLE_LABEL = { product: '业务', architect: '架构', dev: '建模', qa: '校验' }
+/* 七类环节角色（单人开发模式）：业务 → 需求 → 数据 → 本体建模 → 后端 → 前端 → 测试。 */
+export const ROLE_LABEL = {
+  business: '业务', requirement: '需求', data: '数据', modeling: '本体建模',
+  backend: '后端', frontend: '前端', qa: '校验',
+  // 旧角色名保留一份，迁移期的历史数据还能显示对。
+  product: '业务', architect: '架构', dev: '建模',
+}
 export const PRIORITY_LABEL = { urgent: '紧急', normal: '普通', relaxed: '宽松' }
 export const TYPE_LABEL = { requirement: '场景', bug: '缺陷', design: '语义设计', dev: '建模', test: '校验', ops: '运维' }
 export const SEVERITY_LABEL = { p0: 'P0 致命', p1: 'P1 严重', p2: 'P2 一般', p3: 'P3 轻微' }
@@ -61,6 +67,37 @@ export const ONTOLOGY_BLUEPRINT_SECTIONS = [
   { id: 'tests', label: '测试方案' },
 ]
 export const ONTOLOGY_FINDING_LEVEL_LABEL = { blocker: '阻塞', warn: '待改进', info: '提示' }
+
+/* 工具清单（与 src/host/tools.js 注册的 53 个工具一一对应）。
+   设置页给每个角色配「可调用工具白名单」时用这份表勾选；服务端再按同一份名单拦。 */
+export const TOOL_NAMES = [
+  'ontology_config_get', 'ontology_config_set',
+  'ontology_requirement_list', 'ontology_requirement_get', 'ontology_requirement_save',
+  'ontology_requirement_signoff', 'ontology_requirement_folder',
+  'ontology_task_list', 'ontology_task_get', 'ontology_task_create', 'ontology_task_update',
+  'ontology_task_signoff', 'ontology_task_generate_cases', 'ontology_task_block', 'ontology_task_unblock',
+  'ontology_task_comment', 'ontology_task_artifact', 'ontology_task_check', 'ontology_task_coding',
+  'ontology_task_case', 'ontology_test_run', 'ontology_test_suite', 'ontology_bug_duplicate',
+  'ontology_dashboard', 'ontology_workload', 'ontology_burndown', 'ontology_costs', 'ontology_analytics',
+  'ontology_release_list', 'ontology_release_get', 'ontology_release_save', 'ontology_release_publish',
+  'ontology_release_gray', 'ontology_project_save', 'ontology_project_list',
+  'ontology_semantics_get', 'ontology_asset_save', 'ontology_asset_review', 'ontology_service_export',
+  'ontology_review_advice', 'ontology_blueprint', 'ontology_template', 'ontology_container',
+  'ontology_guide_save', 'ontology_guide_search', 'ontology_guide_load',
+  'ontology_plan', 'ontology_agent_ask', 'ontology_skill_builtin',
+  'ontology_skill_list', 'ontology_skill_get', 'ontology_skill_save', 'ontology_skill_delete',
+]
+
+/* 工具白名单在界面上按用途分组，避免 53 个复选框糊成一片。 */
+export const TOOL_GROUP_LABEL = [
+  { id: 'plan', label: '规划与协作', match: name => ['ontology_plan', 'ontology_agent_ask', 'ontology_task_comment', 'ontology_task_list', 'ontology_task_get', 'ontology_task_create', 'ontology_task_update'].includes(name) },
+  { id: 'ontology', label: '本体语义层', match: name => name.startsWith('ontology_semantics') || name.startsWith('ontology_asset') || name.startsWith('ontology_review') || name.startsWith('ontology_blueprint') || name.startsWith('ontology_template') || name.startsWith('ontology_container') || name.startsWith('ontology_service') || name.startsWith('ontology_guide') },
+  { id: 'requirement', label: '场景与需求', match: name => name.startsWith('ontology_requirement') },
+  { id: 'test', label: '用例与联调', match: name => name.startsWith('ontology_test') || name.startsWith('ontology_task_case') || name.startsWith('ontology_task_generate_cases') },
+  { id: 'dev', label: '开发与交付', match: name => ['ontology_task_coding', 'ontology_task_artifact', 'ontology_task_check', 'ontology_task_block', 'ontology_task_unblock', 'ontology_task_signoff'].includes(name) },
+  { id: 'skill', label: '技能库', match: name => name.startsWith('ontology_skill') },
+  { id: 'ops', label: '运营与度量', match: name => ['ontology_dashboard', 'ontology_workload', 'ontology_burndown', 'ontology_costs', 'ontology_analytics', 'ontology_release_list', 'ontology_release_get', 'ontology_release_save', 'ontology_release_publish', 'ontology_release_gray', 'ontology_project_save', 'ontology_project_list', 'ontology_bug_duplicate', 'ontology_config_get', 'ontology_config_set'].includes(name) },
+]
 
 
 /* 权限角色选项（成员/只读/管理员）。原来它躺在 client.src.js 里没人用，

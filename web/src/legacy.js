@@ -7,7 +7,7 @@
 
 import { createMarkdown } from './studio/markdown.js'
 import { fmtTime, fmtDate } from './studio/format.js'
-import { ROLE_LABEL, PRIORITY_LABEL, TYPE_LABEL, SEVERITY_LABEL, ARTIFACT_KINDS, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS, CASE_RESULTS, CASE_RESULT_LABEL, CASE_TYPES, CASE_TYPE_LABEL, CASE_PRIORITIES, ARTIFACT_STATUS_LABEL, CODING_REVIEW_LABEL, CODING_CHANGE_LABEL, PROJECT_STATUS_LABEL, ITERATION_STATUS_LABEL, STRATEGY_LABEL, REQ_STATUS_ORDER, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_STATUS_LABEL, RELEASE_STATUS_ORDER, REQ_STATUS_LABEL, RELEASE_STATUS_LABEL, ONTOLOGY_KIND_LABEL, ONTOLOGY_STATUS_LABEL, ONTOLOGY_SOURCE_LABEL, ONTOLOGY_LAYERS, ONTOLOGY_ATTRIBUTE_TYPE_LABEL, ONTOLOGY_RULE_TYPE_LABEL, ONTOLOGY_EXPRESSION_LANGUAGE_LABEL, ONTOLOGY_ACTION_KIND_LABEL, ONTOLOGY_SHAPE_OPERATOR_LABEL, ONTOLOGY_CARDINALITIES, ONTOLOGY_PACKAGINGS, ONTOLOGY_PROTOCOLS, ONTOLOGY_BLUEPRINT_SECTIONS, ONTOLOGY_FINDING_LEVEL_LABEL, ACCESS_ROLE_OPTIONS, STRATEGIES, ROUTE_LABEL } from './studio/labels.js'
+import { ROLE_LABEL, PRIORITY_LABEL, TYPE_LABEL, SEVERITY_LABEL, ARTIFACT_KINDS, ARTIFACT_KIND_LABEL, ARTIFACT_STATUS, CASE_RESULTS, CASE_RESULT_LABEL, CASE_TYPES, CASE_TYPE_LABEL, CASE_PRIORITIES, ARTIFACT_STATUS_LABEL, CODING_REVIEW_LABEL, CODING_CHANGE_LABEL, PROJECT_STATUS_LABEL, ITERATION_STATUS_LABEL, STRATEGY_LABEL, REQ_STATUS_ORDER, DOC_KIND_LABEL, DOC_KIND_ORDER, DOC_STATUS_LABEL, RELEASE_STATUS_ORDER, REQ_STATUS_LABEL, RELEASE_STATUS_LABEL, ONTOLOGY_KIND_LABEL, ONTOLOGY_STATUS_LABEL, ONTOLOGY_SOURCE_LABEL, ONTOLOGY_LAYERS, ONTOLOGY_ATTRIBUTE_TYPE_LABEL, ONTOLOGY_RULE_TYPE_LABEL, ONTOLOGY_EXPRESSION_LANGUAGE_LABEL, ONTOLOGY_ACTION_KIND_LABEL, ONTOLOGY_SHAPE_OPERATOR_LABEL, ONTOLOGY_CARDINALITIES, ONTOLOGY_PACKAGINGS, ONTOLOGY_PROTOCOLS, ONTOLOGY_BLUEPRINT_SECTIONS, ONTOLOGY_FINDING_LEVEL_LABEL, TOOL_NAMES, TOOL_GROUP_LABEL, ACCESS_ROLE_OPTIONS, STRATEGIES, ROUTE_LABEL } from './studio/labels.js'
 import { buildRoster, filterRoster, ownerLabel, memberLabel, toDateInput, fromDateInput, artifactsWithoutBody, cardOwner } from './studio/roster.js'
 import { createFields } from './studio/fields.js'
 import { createSideDrawer } from './studio/shell.js'
@@ -30,6 +30,7 @@ import { IntakePage, RequirementsPage } from './studio/pages/requirements.js'
 import { ReleasesPage } from './studio/pages/releases.js'
 import { AnalyticsPage } from './studio/pages/analytics.js'
 import { OntologyPage } from './studio/pages/ontology.js'
+import { PlanPage } from './studio/pages/plan.js'
 
 /**
  * dsh-ontology — browser half.
@@ -2344,6 +2345,7 @@ function installKeyboardActivation() {
               const Tabs = kit('TabsBar')
               const items = [
                 { id: 'dashboard', label: '工作台', hint: '今天该看什么：在办、逾期、阻塞、缺陷超时、准出被拦' },
+                { id: 'plan', label: '规划', hint: '单人开发起点：一句业务话 → 阶段计划 + 每步规范 + 初定版本 → 一键落成需求与步骤卡' },
                 { id: 'board', label: '看板', hint: '按生命周期推进建模卡；点开卡片能看计划、交付物、校验、讨论' },
                 { id: 'ontology', label: '语义层', hint: '统一语义层：业务对象 / 关系 / 规则 / 行动，AI 草稿、专家校准与服务封装' },
                 { id: 'requirements', label: '场景', hint: '本体场景、功能点、可追溯矩阵与场景级准出' },
@@ -2371,6 +2373,8 @@ function installKeyboardActivation() {
             h('span', { className: 'ds-stat' },
               tab === 'dashboard'
                 ? '今天该看什么：风险 · 流程 · 待办'
+                : tab === 'plan'
+                  ? '单人开发：先规划，再一步步执行'
                 : tab === 'board'
                 ? `${(state.config.experts ?? []).filter(expert => expert.enabled !== false).length} 位专家 · ${(state.config.teams ?? []).length} 个专家团`
                 : tab === 'requirements'
@@ -2395,6 +2399,8 @@ function installKeyboardActivation() {
           : null,
         tab === 'board'
           ? h(Board, { state, onWip: async (status, current) => { const raw = await promptDialog(`这一列的 WIP 上限（0 = 不限，最多 50）`, { title: 'WIP 上限', defaultValue: String(current) }); if (raw === null) return; const value = Math.min(50, Math.max(0, Math.trunc(Number(String(raw).trim()) || 0))); try { await api('/columns/wip', { status, wip: value }); toast(value === 0 ? '已取消 WIP 上限' : `WIP 上限设为 ${value}`); await reload() } catch (cause) { toast(cause instanceof Error ? cause.message : String(cause), 'error') } }, onMove: async (id, status) => { try { await api('/task/update', { id, status }); await reload() } catch (cause) { /* 准出/设计闸门会在这里抛错。以前是 void 吞掉，界面只表现为「卡弹回去」，用户以为看板坏了 */ toast(cause instanceof Error ? cause.message : String(cause), 'error') } }, onOpen: setOpenId })
+          : tab === 'plan'
+            ? h(PlanPage, { state, onChanged: reload, onOpenTask: setOpenId })
           : tab === 'ontology'
             ? h(OntologyPage, { state })
           : tab === 'dashboard'

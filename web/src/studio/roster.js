@@ -40,9 +40,9 @@ export function ownerLabel(config, owner) {
 
 export function buildRoster(config) {
   const items = []
-  // 角色位放最前面：泳道默认按「产品经理 / 研发工程师」配，具体落到哪位
-  // 领域专家由卡片所属业务领域决定。
-  for (const role of ['product', 'architect', 'dev', 'qa']) {
+  // 角色位放最前面：泳道默认按「业务 / 需求 / 数据 / 建模 / 后端 / 前端 / 测试」配，
+  // 具体落到哪位领域专家由卡片所属业务领域决定。
+  for (const role of ['business', 'requirement', 'data', 'modeling', 'backend', 'frontend', 'qa']) {
     items.push({
       key: 'r:' + role,
       name: '角色 · ' + (ROLE_LABEL[role] ?? role),

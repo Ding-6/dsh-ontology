@@ -476,9 +476,9 @@ export function requirementPointsFingerprint(points) {
   return JSON.stringify((points ?? []).map(point => [point.id, point.text, point.priority, point.owner ?? '']))
 }
 
-/** 这张卡是不是已经产出过东西：到了测试/验收/完成、签过字、跑过用例、有提交。 */
+/** 这张卡是不是已经产出过东西：到了联调测试/前端实现/完成、签过字、跑过用例、有提交。 */
 export function requirementTaskTouched(task) {
-  if (['test', 'accept', 'done'].includes(String(task.status))) return true
+  if (['test', 'frontend', 'done'].includes(String(task.status))) return true
   if (task.signoff !== null && task.signoff !== undefined) return true
   if ((task.cases ?? []).some(item => item.result === 'pass')) return true
   if ((task.coding?.commits ?? []).length > 0) return true
@@ -498,11 +498,13 @@ export async function saveRequirement(store, input) {
     const existing = state.requirements.find(item => item.id === draft.id)
     if (existing === undefined) {
       const now = Date.now()
+      // 单人开发模式：一个人自己写需求，不强制「转产品补 PRD」这道审批。
+      const solo = String(state.config?.workflow?.mode ?? 'solo') === 'solo'
       const needsProduct = String(draft.links?.prd ?? '').trim() === '' && (draft.docs ?? []).every(doc => String(doc.content ?? '').trim() === '') && draft.baseline === null
       const created = {
         ...draft,
-        status: needsProduct === true ? 'review' : draft.status,
-        review: needsProduct === true ? { status: 'pending', by: String(input.by ?? input.operator ?? '系统').slice(0, 40), at: now, note: '新建需求：保存后自动转产品补 PRD' } : draft.review,
+        status: needsProduct === true && solo !== true ? 'review' : draft.status,
+        review: needsProduct === true && solo !== true ? { status: 'pending', by: String(input.by ?? input.operator ?? '系统').slice(0, 40), at: now, note: '新建需求：保存后自动转产品补 PRD' } : draft.review,
         code: draft.code.length > 0 ? draft.code : nextRequirementCode(state.requirements),
         createdAt: now,
         updatedAt: now,
@@ -700,13 +702,22 @@ export function requirementGate(state, requirement) {
   const matrix = requirementMatrix(state, requirement)
   const blockers = []
   const warnings = []
+  // solo = 一个人开发：签字、评审、补 PRD 这类「谁批一下」的门槛降级成提示，
+  // 真正影响交付质量的门槛（卡没完成、有失败用例、缺陷没关）仍然拦。
+  const solo = String(state.config?.workflow?.mode ?? 'solo') !== 'team'
   const pool = requirement.pool ?? { score: 0 }
   if (!(pool.score > 0)) warnings.push('还没做需求池打分（RICE）：影响面、影响度、置信度、成本填一下就能排序')
   const openQuestions = (requirement.questions ?? []).filter(item => item.status === 'open')
   if (String(requirement.links?.prd ?? '').trim() === '' && (requirement.docs ?? []).every(doc => String(doc.content ?? '').trim() === '') && requirement.baseline === null) {
-    blockers.push('需求还没有产品输出：先补 PRD 链接或正文，再拆卡')
+    const text = '需求还没有产品输出：先补 PRD 链接或正文，再拆卡'
+    if (solo === true) warnings.push(text + '（单人模式：自己补上即可，不拦）')
+    else blockers.push(text)
   }
-  if (openQuestions.length > 0) blockers.push(`还有 ${openQuestions.length} 个待确认问题没回答：${openQuestions.slice(0, 3).map(item => item.text.slice(0, 18)).join('、')}`)
+  if (openQuestions.length > 0) {
+    const text = `还有 ${openQuestions.length} 个待确认问题没回答：${openQuestions.slice(0, 3).map(item => item.text.slice(0, 18)).join('、')}`
+    if (solo === true) warnings.push(text + '（单人模式：自己确认，不拦）')
+    else blockers.push(text)
+  }
   if (tasks.length === 0) blockers.push('这条需求下还没有任何任务卡')
   if ((requirement.points ?? []).length === 0) warnings.push('还没有拆功能点，可追溯矩阵是空的')
   const open = tasks.filter(task => task.status !== 'done')
@@ -717,7 +728,9 @@ export function requirementGate(state, requirement) {
   const blocked = tasks.filter(task => task.blocked !== null && task.blocked !== undefined)
   if (blocked.length > 0) blockers.push(`${blocked.length} 张卡还卡在阻塞：${blocked.slice(0, 3).map(task => task.code || task.id).join('、')}`)
   // 绕过门禁完成的卡：不拦（override 本来就是有意开的逃生舱），但交付时必须被看见。
-  // 协作：光有「测试跑完了」这种自动汇总不算协作过——必须有产品或架构专家在卡上说话。
+  // 协作：光有「测试跑完了」这种自动汇总不算协作过——必须有业务或需求专家在卡上说话。
+  // 角色名两代都认：v0.7.0 之前是 product/architect，现在是 business/requirement。
+  const CLARIFY_ROLES = new Set(['business', 'product', 'requirement', 'architect'])
   const roleOf = new Map((state.config?.experts ?? []).map(expert => [String(expert.name ?? ''), String(expert.role ?? '')]))
   const spokenRoles = new Set()
   for (const task of tasks) {
@@ -726,8 +739,8 @@ export function requirementGate(state, requirement) {
       if (role !== undefined && role !== '') spokenRoles.add(role)
     }
   }
-  if (tasks.length > 0 && !spokenRoles.has('product') && !spokenRoles.has('architect')) {
-    warnings.push('这条需求没有经过澄清与方案：卡上没有产品/架构专家的讨论（只有自动跑用例的汇总）')
+  if (tasks.length > 0 && ![...spokenRoles].some(role => CLARIFY_ROLES.has(role))) {
+    warnings.push('这条需求没有经过澄清与方案：卡上没有业务/需求角色的讨论（只有自动跑用例的汇总）')
   }
   // 协作：完成的卡上一条评论都没有，说明它多半是被脚本直接推过来的，没过专家。
   const silent = tasks.filter(task => task.status === 'done' && (task.comments ?? []).length === 0)
@@ -787,18 +800,26 @@ export function requirementGate(state, requirement) {
     const empty = tasks.reduce((sum, task) => sum + (task.artifacts ?? []).filter(item => String(item.content ?? '').trim() === '').length, 0)
     if (empty > 0) warnings.push(`${empty} 件交付物还没有正文`)
   }
-  if (requirement.signoff === null || requirement.signoff === undefined) blockers.push('还没有需求级验收签字')
+  if (requirement.signoff === null || requirement.signoff === undefined) {
+    const text = '还没有需求级验收签字'
+    if (solo === true) warnings.push(text + '（单人模式：自己确认即可，不拦）')
+    else blockers.push(text)
+  }
   // 评审没通过的草稿/待评审需求不该往下拆卡：先过评审，再干活。
   const review = requirement.review ?? null
   const reviewApproved = review !== null && review.status === 'approved'
   const started = requirement.status === 'active' || requirement.status === 'delivered' || requirement.status === 'closed'
   if (!reviewApproved && !started) {
-    blockers.push(requirement.status === 'review'
+    const text = requirement.status === 'review'
       ? '需求还在评审中：等评审人给出结论（通过之后才能拆卡）'
-      : '需求还没评审通过：先点「提交评审」，评审通过后再拆卡')
+      : '需求还没评审通过：先点「提交评审」，评审通过后再拆卡'
+    if (solo === true) warnings.push(text + '（单人模式：不需要评审，自己往下走）')
+    else blockers.push(text)
   }
   if (review !== null && review.status === 'changes_requested') {
-    blockers.push(`需求评审被打回${review.note === '' ? '' : `：${review.note.slice(0, 80)}`}`)
+    const text = `需求评审被打回${review.note === '' ? '' : `：${review.note.slice(0, 80)}`}`
+    if (solo === true) warnings.push(text)
+    else blockers.push(text)
   }
   // 需求中途改过内容：已经产出过的卡是按旧版做的，签字作废、必须重新走一遍确认。
   const change = requirement.change ?? null
@@ -859,6 +880,7 @@ export function requirementProgress(state, requirement) {
 export function taskExitGate(state, task) {
   const blockers = []
   const warnings = []
+  const solo = String(state.config?.workflow?.mode ?? 'solo') !== 'team'
   const checklist = task.checklist ?? []
   const unchecked = checklist.filter(item => item.done !== true)
   if (unchecked.length > 0) {
@@ -870,7 +892,11 @@ export function taskExitGate(state, task) {
   // CI 门禁：真跑过流水线且失败，不允许收口（没接 GitLab 时这个字段是空的，不会误伤）。
   if (task.gitlabMR?.pipeline?.status === 'failed') blockers.push(`CI 流水线没通过：${task.gitlabMR.pipeline.id ? `#${task.gitlabMR.pipeline.id}` : '最近一次运行'}`)
   if (task.blocked !== undefined && task.blocked !== null) blockers.push('这张卡还挂着阻塞标记')
-  if (task.signoff === undefined || task.signoff === null) blockers.push('还没有验收签字')
+  if (task.signoff === undefined || task.signoff === null) {
+    const text = '还没有验收签字'
+    if (solo === true) warnings.push(text + '（单人模式：自己确认即可，不拦）')
+    else blockers.push(text)
+  }
   if (cases.length === 0) warnings.push('这张卡没有测试用例，建议至少补一条主流程用例')
   else {
     const pending = cases.filter(item => item.result === 'pending' || item.result === 'skip').length
@@ -935,7 +961,7 @@ export function buildDashboard(state) {
   const blocked = open.filter(task => task.blocked != null)
   const slaOverdue = open.filter(task => task.type === 'bug' && host.bugSla(task, state.config).state === 'overdue')
   const gateFailed = open.filter(task => {
-    if (task.status !== 'test' && task.status !== 'accept') return false
+    if (task.status !== 'test' && task.status !== 'frontend') return false
     const gate = taskExitGate(state, task)
     return gate.blockers.length > 0
   })
@@ -969,9 +995,9 @@ export function buildDashboard(state) {
       integrationsBroken: host.healthReport().broken,
     },
     flow: {
-      review: tasks.filter(task => task.status === 'review').length,
+      backend: tasks.filter(task => task.status === 'backend').length,
       test: tasks.filter(task => task.status === 'test').length,
-      accept: tasks.filter(task => task.status === 'accept').length,
+      frontend: tasks.filter(task => task.status === 'frontend').length,
       doneToday: doneToday.length,
       doneWeek: doneWeek.length,
     },
@@ -1510,8 +1536,8 @@ export async function updateTask(store, id, patch) {
       host.INTEGRATION.lastPushError = String(error?.message ?? error).slice(0, 300)
     }
   }
-  // 卡进「待评审」时自动核对一次代码事实：AI 说改了什么，仓库里得真有。
-  if (moved !== null && moved.to === 'review') {
+  // 卡进「后端与服务」时自动核对一次代码事实：AI 说改了什么，仓库里得真有。
+  if (moved !== null && moved.to === 'backend') {
     await autoVerifyCoding(store, id).catch(() => {})
   }
   return result

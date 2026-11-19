@@ -11,8 +11,8 @@ export function bugSeverityFor(casePriority, cardStatus) {
   const raw = String(casePriority ?? '').trim().toLowerCase()
   let index = SEVERITY_ORDER.indexOf(raw)
   if (index < 0) index = SEVERITY_ORDER.indexOf('p2')
-  // 「已完成/待验收的卡跑失败了」比开发中的失败更要紧：往上升一级（p0 封顶）
-  const regression = cardStatus === 'done' || cardStatus === 'accept'
+  // 「已完成/前端实现完成的卡跑失败了」比开发中的失败更要紧：往上升一级（p0 封顶）
+  const regression = cardStatus === 'done' || cardStatus === 'frontend'
   if (regression && index > 0) index -= 1
   const severity = SEVERITY_ORDER[index]
   const priority = severity === 'p0' ? 'urgent' : severity === 'p3' ? 'relaxed' : 'normal'

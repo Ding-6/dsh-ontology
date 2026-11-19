@@ -16,7 +16,9 @@
 插件**随包内置《智元·本体智能体平台操作手册 V2.0》（86 个章节）**，一键载入手册库后，专家用 `ontology_guide_search` 检索并照手册教你操作；你自己的平台手册也能存进同一本手册库。
 语义层里躺着三类本体资产——业务对象 / 对象关系（数据层）、业务规则（逻辑层）、可调用行动（行动层）；
 agent 负责 AI 自动生成约 80%，专家审核校准约 20%；对外再按对象 / 关系 / 规则 / 行动四类封装成通用 MCP 工具或专有本体 SDK。
-自建 GitLab 管代码、飞书管交流，agent 负责业务 / 架构 / 建模 / 校验四个角色的具体活儿。
+自建 GitLab 管代码、飞书管交流，agent 负责**业务 / 需求 / 数据 / 建模 / 后端 / 前端 / 测试七个环节角色**的具体活儿。
+它也按**一个人开发**来设计：**规划**页签先把你的业务拆成阶段计划、每步规范与初定版本，一键落成需求与步骤卡；
+每个角色有独立的提示词、技能、工具白名单、插件与 MCP，可以互相对话；签字与评审门槛默认降级为提示——**不用等谁审批**。
 
 运行环境：DSH `0.2.1-rc.5`，Node 22 以上，Linux/macOS（Windows 原生不支持 `link:` 安装 + systemd 托管）。
 
@@ -34,9 +36,10 @@ agent 负责 AI 自动生成约 80%，专家审核校准约 20%；对外再按�
 | 设计 | 语义设计评审记录 + 进开发前的闸门（`src/host/design.js`） |
 | 蓝图 | **应用蓝图六章**：数据模型 / 规则引擎 / 后端与 API 契约 / 前端设计 / 本体怎么驱动应用 / 测试方案，从语义层直接生成 |
 | 骨架 | 八套**领域骨架模板**（通用 / 工业 / 安全 / 医疗 / 国防 / 地理 / 金融 / 知识），只给结构不给行业数据 |
-| 执行 | 一卡一会话、一卡一 worktree；自动派单给业务/架构/建模/校验四类专家 |
+| 规划 | **规划页签**：一句业务话 → 七段标准动作的阶段计划 + 每步规范与验收 + 初定版本（骨架实例化的四类草稿）；可一键落成需求与步骤卡 |
+| 执行 | 一卡一会话、一卡一 worktree；自动派单给业务/需求/数据/建模/后端/前端/测试七类角色专家；每个角色可配自己的工具白名单、插件包与 MCP |
 | 校验 | 接口 / shell / 数据库三种执行器；跨卡用例总览；失败自动开缺陷卡 |
-| 准出 | 卡片与需求两级准出、验收清单、覆盖矩阵、人工签字 |
+| 准出 | 卡片与需求两级准出、验收清单、覆盖矩阵、人工签字；**单人开发模式**（默认）下签字与评审只提示不拦 |
 | 发布 | 版本 tag、灰度与部署记录、冒烟清单、发布门禁 |
 | 观测 | 工作台（在办/逾期/阻塞/缺陷）、效能（周期分布/返工/AI 成本）、燃尽 |
 | 集成 | GitLab（MR 事实对账）、飞书（云文档/多维表格/webhook）、内部市场 |
@@ -53,8 +56,8 @@ agent 负责 AI 自动生成约 80%，专家审核校准约 20%；对外再按�
 
 ```mermaid
 flowchart LR
-  UI["浏览器<br/>client.js + web/src<br/>看板 · 语义层 · 场景 · 校验 · 本体版本 · 效能 · 设置"]
-  API["index.js<br/>apply(ctx) · 50 个 ontology_* 工具 · /ontology-api 前缀路由"]
+  UI["浏览器<br/>client.js + web/src<br/>看板 · 规划 · 语义层 · 场景 · 校验 · 本体版本 · 效能 · 设置"]
+  API["index.js<br/>apply(ctx) · 53 个 ontology_* 工具 · /ontology-api 前缀路由"]
   HOST["src/host/*<br/>domain · dispatcher · executor · integrations · routes"]
   DB[("SQLite<br/>state · 快照 · side 键")]
   AGENT["专家会话<br/>ontology-任务-专家"]
@@ -220,7 +223,7 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 | `cd web && npm run guard` | CSS 里写回 `hsl(var(--x))`（颜色解析失败）、Radix Portal 忘记 `container={portalRoot()}`（弹层「存在但不可见」）、产物丢失门户作用域属性 |
 | `npm run smoke:store -- ~/.dsh/dsh-ontology.db` | 用生产库的 `.db/-wal/-shm` 副本在本地跑真实启动路径，抓「空库能起、真库就炸」的 `ReferenceError` |
 | `npm run release:check` | 发版前文档自检：CHANGELOG 有本版条目、compatibility 版本号一致、README 提到的脚本都存在；**改了代码却没改 README 会直接红** |
-| `npm test` | **124 条**契约：manifest、产物哈希、宿主接口、跨模块导入、只读绑定赋值、迁移与文档一致性、门禁纯函数、快捷键解析 |
+| `npm test` | **130 条**契约：manifest、产物哈希、宿主接口、跨模块导入、只读绑定赋值、迁移与文档一致性、门禁纯函数、快捷键解析 |
 
 真机验收（需要 `ONTOLOGY_TOKEN`，对着测试机跑，非零即红）：
 
@@ -228,6 +231,7 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 | --- | --- |
 | `npm run verify:pages` | 8 个页面（含语义层）能进、能渲染、页签高亮、无 pageerror（25 项） |
 | `npm run verify:ontology` | **语义层端到端**（33 项）：空台账起步 → 人工登记 AI 草稿 → 专家校准为「已确认」并留结论 → 缺口与闸门跟服务端对账 → 多本体 / 建模建议 / 领域骨架生成骨架 → 应用蓝图三章 → 存入手册并检索命中 → 载入内置手册书（86 章节）并检索命中 → MCP 封装 → 探针数据自清理 |
+| `npm run verify:solo` | **单人开发模式端到端**（29 项）：规划页签 → 一句业务话 → 七段阶段计划 + 每步规范与验收 + 初定版本 → 一键落成需求与 13 张步骤卡 → 工作模式默认单人、八列按角色位接单 → 专家抽屉的工具白名单 / 插件 / MCP → 探针数据自清理 |
 | `npm run verify:audit` | **27 个模块**（8 页签 + 16 设置面板 + 3 抽屉）里还有没有原生下拉/原生输入/老按钮（违规必须为 0） |
 | `npm run verify:selects` | 下拉是否都是官方组件、尺寸是否合规范、弹层是否真的在最上层 |
 | `npm run verify:drawer` | 抽屉打开/聚焦/Esc/取消（15 项） |
@@ -250,7 +254,8 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 | 拆卡 | 说没有后端，功能点却要建表 / 写接口 | 提示 |
 | 拆卡 | 功能点没有验收标准（长不出用例） | 提示 |
 | 卡准出 | 清单没勾完 / 有用例失败 / 卡被标阻塞 / 没人签字 | **拦**（`override` 可强推，须写原因并留痕） |
-| 需求准出 | 没有产品输出 / 评审没过 / 有待确认问题 / 卡没完成 / 卡在阻塞 / 缺陷未关 / 用例失败 / **一条跑过的用例都没有** / 没签字 | **拦** |
+| 卡准出 | 没人签字（**单人开发模式**下） | 提示：一个人开发自己确认即可 |
+| 需求准出 | 没有产品输出 / 评审没过 / 有待确认问题 / 卡没完成 / 卡在阻塞 / 缺陷未关 / 用例失败 / **一条跑过的用例都没有** / 没签字 | **拦**（单人开发模式下，签字 / 评审 / 待确认问题只提示不拦） |
 | 需求准出 | **卡上没有产品/架构专家的讨论**（只有自动跑用例的汇总）、RICE 没打分、功能点没被通过用例覆盖、**有用例没跑过**、**有用例被标跳过**、**「通过」是手标的没有执行记录**、**有卡是强推的**、没有交付物 | 提示 |
 | 发布 | tag 名、关联卡、冒烟清单 | **拦** |
 
@@ -274,9 +279,9 @@ GitHub Actions（`.github/workflows/release.yml`）会依次：校验 tag 与 `p
 ## 开发与兼容性
 
 - 参与开发（构建链、部署、验证要求、禁区）：[AGENTS.md](AGENTS.md)
-更新日志（每版改了什么、有哪些已知限制）：[CHANGELOG.md](CHANGELOG.md)
-上手第一天（三条命令，已在全新 clone 上验证过）：[docs/quickstart.md](docs/quickstart.md)
-发布到插件市场（npm / GitHub 发版 + 收录条目 + 自查清单）：[docs/publish.md](docs/publish.md)
+- 更新日志（每版改了什么、有哪些已知限制）：[CHANGELOG.md](CHANGELOG.md)
+- 上手第一天（三条命令，已在全新 clone 上验证过）：[docs/quickstart.md](docs/quickstart.md)
+- 发布到插件市场（npm / GitHub 发版 + 收录条目 + 自查清单）：[docs/publish.md](docs/publish.md)
 - 依赖的 dsh 宿主接口、升级 runbook、兼容矩阵与已知限制：[docs/compatibility.md](docs/compatibility.md)
 - 本机（Windows 桌面宿主）改了代码怎么让它生效：`npm run sync:live`（宿主按真实文件 URL 缓存 ESM 模块，换路径才重新 import；细节见 [AGENTS.md](AGENTS.md) §3.1）
 
